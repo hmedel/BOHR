@@ -1,0 +1,11 @@
+VERSION=1.0
+DESCRIPTION="Sistema RAG básico - Sin autenticación"
+FEATURES="
+- 7 libros de química cargados
+- RAG con DeepSeek
+- Frontend básico
+- Sin login
+- Sin historial persistente
+"
+PORT_BACKEND=8001
+PORT_FRONTEND=9001

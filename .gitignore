@@ -1,0 +1,61 @@
+# ── Entornos y dependencias ──────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# ── Datos persistentes (no versionar) ───────────────────────
+RAG-API-versions/v2/data/chroma/
+RAG-API-versions/v2/data/rag_system.db
+RAG-API-versions/v2/data/rag_system.db.backup*
+RAG-API-versions/v2/data/backups/
+RAG-API-versions/v2/data/uploaded/
+RAG-API-versions/v1/data/
+
+# ── Logs ────────────────────────────────────────────────────
+*.log
+logs/
+RAG-API-versions/v2/server*.log
+RAG-API-versions/v1/server*.log
+
+# ── Analytics: reportes y snapshots generados ───────────────
+RAG-API-versions/v2/analytics/reports/
+RAG-API-versions/v2/analytics/snapshots/
+
+# ── Libros PDF (archivos grandes) ────────────────────────────
+Books/
+RAG-API-versions/v2/data/uploads/*.md
+
+# ── Backups ──────────────────────────────────────────────────
+Backups/
+RAG-API-versions/v2/backups/
+backups/
+
+# ── Archivos del sistema y editores ──────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Archivos temporales y de prueba ──────────────────────────
+*.tmp
+*.tar.gz
+upload_test.log
+julia-*.tar.gz
+
+# ── LibreChat (proyecto separado, no versionar aquí) ─────────
+LibreChat/
+
+# Backups y versiones antiguas de código
+*.backup*
+*.full_exam
+*.with_answers
+*.before_*
+main_with_analytics.py

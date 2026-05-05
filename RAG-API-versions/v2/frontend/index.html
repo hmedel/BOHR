@@ -1,0 +1,1771 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asistente de Estructura de la Materia - FESC-UNAM</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="bohr.png">
+    <link rel="shortcut icon" type="image/png" href="bohr.png">
+    <link rel="apple-touch-icon" href="bohr.png">
+
+    <!-- Marked.js para Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- Highlight.js para código -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+    <!-- KaTeX para matemáticas -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <style>
+        /* [Todos los estilos CSS anteriores - sin cambios] */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --unam-azul: #003D7A;
+            --unam-oro: #FFB800;
+            --unam-azul-oscuro: #002855;
+            --unam-gris: #F5F5F5;
+            --texto-oscuro: #1a1a1a;
+            --borde: #e0e0e0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--unam-gris);
+            color: var(--texto-oscuro);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .auth-container {
+            display: flex;
+            min-height: 100vh;
+            background: linear-gradient(135deg, var(--unam-azul) 0%, var(--unam-azul-oscuro) 100%);
+        }
+
+        .auth-left {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: white;
+        }
+
+        .auth-branding {
+            text-align: center;
+        }
+
+        .auth-branding h1 {
+            font-size: 3em;
+            margin-bottom: 20px;
+            color: var(--unam-oro);
+        }
+
+        .auth-branding p {
+            font-size: 1.3em;
+            line-height: 1.6;
+            opacity: 0.95;
+        }
+
+        .auth-right {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: white;
+            padding: 40px;
+        }
+
+        .auth-form {
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .auth-form h2 {
+            color: var(--unam-azul);
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--unam-azul);
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid var(--borde);
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--unam-azul);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            background: var(--unam-azul);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .btn:hover:not(:disabled) {
+            background: var(--unam-azul-oscuro);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .auth-switch {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+        }
+
+        .auth-switch a {
+            color: var(--unam-azul);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .app-container {
+            display: none;
+            height: 100vh;
+            flex-direction: column;
+        }
+
+        .app-header {
+            background: var(--unam-azul);
+            color: white;
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .app-title h1 {
+            font-size: 1.5em;
+            color: var(--unam-oro);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .btn-analytics {
+            background: var(--unam-oro);
+            color: var(--unam-azul);
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn-logout {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 8px 20px;
+            border: 1px solid white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .app-body {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 300px;
+            background: white;
+            border-right: 2px solid var(--borde);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            background: var(--unam-azul);
+        }
+
+        .btn-new-chat {
+            width: 100%;
+            padding: 12px;
+            background: var(--unam-oro);
+            color: var(--unam-azul);
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .conversations-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .conversation-item {
+            padding: 12px;
+            margin-bottom: 8px;
+            background: var(--unam-gris);
+            border-radius: 8px;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+        }
+
+        .conversation-item:hover {
+            background: #e8e8e8;
+        }
+
+        .conversation-item.active {
+            background: #e3f2fd;
+            border-left-color: var(--unam-azul);
+        }
+
+        .typing-cursor {
+            display: inline-block;
+            animation: blink 0.8s step-end infinite;
+            color: var(--unam-azul);
+            font-weight: bold;
+        }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+        .progress-panel {
+            border-top: 1px solid var(--borde);
+            padding: 14px 12px;
+            background: #f8f9fc;
+            font-size: 0.82rem;
+        }
+        .progress-title {
+            font-weight: 700;
+            color: var(--unam-azul);
+            margin-bottom: 10px;
+            font-size: 0.85rem;
+        }
+        .progress-stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            color: #444;
+        }
+        .progress-stat .val {
+            font-weight: 600;
+            color: var(--unam-azul);
+        }
+        .progress-bar-wrap {
+            margin: 8px 0 4px;
+        }
+        .progress-bar-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: #666;
+            margin-bottom: 2px;
+        }
+        .progress-bar-track {
+            height: 6px;
+            background: #e0e4ec;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        .progress-topics {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 6px;
+        }
+        .progress-topic-tag {
+            background: #e3f2fd;
+            color: var(--unam-azul);
+            border-radius: 10px;
+            padding: 2px 8px;
+            font-size: 0.72rem;
+        }
+        .progress-loading { color: #999; font-size: 0.8rem; }
+        .progress-trend { font-size: 0.78rem; color: #555; margin-top: 6px; font-style: italic; }
+
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+        }
+
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px;
+        }
+
+        .message {
+            margin-bottom: 25px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .message-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .message-avatar img {
+            width: 80%;
+            height: 80%;
+            object-fit: contain;
+            margin: auto;
+        }
+
+        .message.user .message-avatar {
+            background: var(--unam-oro);
+            color: var(--unam-azul);
+        }
+
+        .message.assistant .message-avatar {
+            background: var(--unam-azul);
+        }
+
+        .message-content {
+            margin-left: 38px;
+            line-height: 1.7;
+            font-size: 1.05em;
+        }
+
+        .message.user .message-content {
+            background: var(--unam-gris);
+            padding: 15px 20px;
+            border-radius: 12px;
+            border-left: 3px solid var(--unam-oro);
+        }
+
+        .message.assistant .message-content {
+            padding: 20px 25px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            border-left: 4px solid var(--unam-azul);
+        }
+
+        /* Markdown styles */
+        .message-content h1 {
+            color: var(--unam-azul);
+            font-size: 1.8em;
+            margin-top: 25px;
+            margin-bottom: 15px;
+            border-bottom: 2px solid var(--unam-oro);
+            padding-bottom: 8px;
+        }
+
+        .message-content h2 {
+            color: var(--unam-azul);
+            font-size: 1.5em;
+            margin-top: 20px;
+            margin-bottom: 12px;
+            border-bottom: 1px solid var(--borde);
+            padding-bottom: 6px;
+        }
+
+        .message-content h3 {
+            color: var(--unam-azul);
+            font-size: 1.25em;
+            margin-top: 18px;
+            margin-bottom: 10px;
+        }
+
+        .message-content p {
+            margin-bottom: 16px;
+            line-height: 1.7;
+        }
+
+        .message-content ul,
+        .message-content ol {
+            margin-left: 30px;
+            margin-bottom: 16px;
+        }
+
+        .message-content li {
+            margin-bottom: 10px;
+            line-height: 1.6;
+        }
+
+        .message-content code {
+            background: #e8eaf6;
+            color: #c62828;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.92em;
+        }
+
+        .message-content pre {
+            background: #1e1e1e;
+            padding: 18px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+
+        .message-content pre code {
+            background: none;
+            color: #d4d4d4;
+            padding: 0;
+            font-size: 0.9em;
+        }
+
+        .message-content blockquote {
+            border-left: 4px solid var(--unam-oro);
+            padding: 15px 20px;
+            margin: 20px 0;
+            color: #555;
+            font-style: italic;
+            background: #fafafa;
+            border-radius: 4px;
+        }
+
+        .message-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+        }
+
+        .message-content table th {
+            background: var(--unam-azul);
+            color: white;
+            padding: 12px;
+            text-align: left;
+            border: 1px solid var(--borde);
+        }
+
+        .message-content table td {
+            padding: 10px;
+            border: 1px solid var(--borde);
+        }
+
+        .message-content table tr:nth-child(even) {
+            background: var(--unam-gris);
+        }
+
+        /* KaTeX styles - asegurar que se vea bien */
+        .message-content .katex {
+            font-size: 1.1em;
+        }
+
+        .message-content .katex-display {
+            margin: 20px 0;
+            padding: 12px 8px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .message-content .katex-display > .katex {
+            white-space: nowrap;
+        }
+
+        /* Evitar que ecuaciones inline rompan el flujo */
+        .message-content .katex-inline {
+            white-space: nowrap;
+        }
+
+        /* Scrollbar sutil para ecuaciones largas */
+        .message-content .katex-display::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .message-content .katex-display::-webkit-scrollbar-thumb {
+            background: var(--unam-azul);
+            border-radius: 2px;
+        }
+
+        /* Errores de KaTeX: mostrar el source LaTeX en rojo */
+        .message-content .katex-error {
+            color: #c62828;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            background: #fff3f3;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+
+        .message-footer {
+            margin-left: 38px;
+            margin-top: 12px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .message-sources {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .source-tag {
+            background: var(--unam-azul);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+        }
+
+        .feedback-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-feedback {
+            background: none;
+            border: 1px solid #ddd;
+            padding: 4px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.1em;
+            transition: all 0.2s;
+        }
+
+        .btn-feedback:hover {
+            transform: scale(1.1);
+        }
+
+        .btn-feedback.active-positive {
+            background: #4caf50;
+            border-color: #4caf50;
+            color: white;
+        }
+
+        .btn-feedback.active-negative {
+            background: #f44336;
+            border-color: #f44336;
+            color: white;
+        }
+
+        .input-area {
+            padding: 20px 30px;
+            background: white;
+            border-top: 2px solid var(--borde);
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        #messageInput {
+            flex: 1;
+            padding: 14px 18px;
+            border: 2px solid var(--borde);
+            border-radius: 12px;
+            font-size: 16px;
+            resize: none;
+            max-height: 150px;
+        }
+
+        #messageInput:focus {
+            outline: none;
+            border-color: var(--unam-azul);
+        }
+
+        .btn-send {
+            padding: 14px 28px;
+            background: var(--unam-azul);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-send:hover:not(:disabled) {
+            background: var(--unam-azul-oscuro);
+            transform: translateY(-2px);
+        }
+
+        .btn-send:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Boton hamburguesa para sidebar en movil */
+        .btn-sidebar-toggle {
+            display: none;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5em;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+
+        /* Overlay cuando sidebar esta abierta en movil */
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 9;
+        }
+
+        .sidebar-overlay.active {
+            display: block;
+        }
+
+        /* ========== RESPONSIVE: Tablets (<900px) ========== */
+        @media (max-width: 900px) {
+            /* Auth: columna unica */
+            .auth-container {
+                flex-direction: column;
+            }
+
+            .auth-left {
+                padding: 30px 20px;
+                flex: 0;
+            }
+
+            .auth-branding h1 {
+                font-size: 1.8em;
+            }
+
+            .auth-branding p {
+                font-size: 1em;
+            }
+
+            .auth-right {
+                flex: 1;
+                padding: 30px 20px;
+            }
+
+            /* Sidebar: oculta por defecto, slide-in */
+            .sidebar {
+                position: fixed;
+                top: 0;
+                left: -300px;
+                height: 100vh;
+                z-index: 10;
+                transition: left 0.3s ease;
+                box-shadow: none;
+            }
+
+            .sidebar.open {
+                left: 0;
+                box-shadow: 4px 0 20px rgba(0,0,0,0.3);
+            }
+
+            .btn-sidebar-toggle {
+                display: block;
+            }
+
+            /* Header compacto */
+            .app-header {
+                padding: 10px 15px;
+            }
+
+            .app-title h1 {
+                font-size: 1.1em;
+            }
+
+            .user-info {
+                gap: 8px;
+            }
+
+            .user-name {
+                display: none;
+            }
+
+            .btn-analytics {
+                padding: 6px 10px;
+                font-size: 0.85em;
+            }
+
+            .btn-logout {
+                padding: 6px 12px;
+                font-size: 0.85em;
+            }
+
+            /* Chat: menos padding */
+            .messages-container {
+                padding: 15px;
+            }
+
+            .input-area {
+                padding: 12px 15px;
+            }
+
+            .message-content {
+                margin-left: 0;
+            }
+
+            .message-footer {
+                margin-left: 0;
+                flex-wrap: wrap;
+            }
+        }
+
+        /* ========== RESPONSIVE: Moviles (<600px) ========== */
+        @media (max-width: 600px) {
+            /* Auth aun mas compacta */
+            .auth-left {
+                padding: 20px 15px;
+            }
+
+            .auth-branding img {
+                max-width: 150px !important;
+            }
+
+            .auth-branding h1 {
+                font-size: 1.4em;
+            }
+
+            .auth-right {
+                padding: 20px 15px;
+            }
+
+            .auth-form h2 {
+                font-size: 1.5em;
+            }
+
+            .form-group input {
+                padding: 10px 12px;
+                font-size: 16px; /* prevenir zoom en iOS */
+            }
+
+            /* Header ultra compacto */
+            .app-header {
+                padding: 8px 10px;
+            }
+
+            .app-title h1 {
+                font-size: 0.95em;
+            }
+
+            .btn-analytics {
+                padding: 5px 8px;
+                font-size: 0.8em;
+            }
+
+            .btn-logout {
+                padding: 5px 10px;
+                font-size: 0.8em;
+            }
+
+            /* Mensajes compactos */
+            .messages-container {
+                padding: 10px;
+            }
+
+            .message {
+                margin-bottom: 15px;
+            }
+
+            .message-header {
+                gap: 6px;
+            }
+
+            .message-avatar {
+                width: 24px;
+                height: 24px;
+            }
+
+            .message.user .message-content,
+            .message.assistant .message-content {
+                padding: 10px 12px;
+                font-size: 0.95em;
+                line-height: 1.6;
+            }
+
+            .message-content h1 {
+                font-size: 1.3em;
+            }
+
+            .message-content h2 {
+                font-size: 1.2em;
+            }
+
+            .message-content h3 {
+                font-size: 1.1em;
+            }
+
+            .message-content ul,
+            .message-content ol {
+                margin-left: 20px;
+            }
+
+            /* KaTeX en movil */
+            .message-content .katex {
+                font-size: 1em;
+            }
+
+            .message-content .katex-display {
+                margin: 12px -8px;
+                padding: 10px 6px;
+            }
+
+            /* Input compacto */
+            .input-area {
+                padding: 8px 10px;
+            }
+
+            #messageInput {
+                padding: 10px 12px;
+                font-size: 16px; /* prevenir zoom en iOS */
+                border-radius: 8px;
+            }
+
+            .btn-send {
+                padding: 10px 16px;
+                border-radius: 8px;
+            }
+
+            /* Footer compacto */
+            .message-footer {
+                gap: 8px;
+                font-size: 0.8em;
+            }
+
+            .source-tag {
+                padding: 3px 8px;
+                font-size: 0.8em;
+            }
+
+            /* Tablas responsivas */
+            .message-content table {
+                display: block;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Code blocks responsivos */
+            .message-content pre {
+                padding: 12px;
+                font-size: 0.85em;
+            }
+        }
+        /* ── Welcome modal ─────────────────────────────────────── */
+        .welcome-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55);
+            z-index: 1000;
+            display: flex; align-items: center; justify-content: center;
+            padding: 16px;
+        }
+        .welcome-modal {
+            background: #fff;
+            border-radius: 16px;
+            max-width: 520px; width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+            overflow: hidden;
+            animation: welcomeIn 0.35s cubic-bezier(.34,1.56,.64,1);
+        }
+        @keyframes welcomeIn {
+            from { opacity:0; transform: scale(0.88) translateY(20px); }
+            to   { opacity:1; transform: scale(1)    translateY(0);     }
+        }
+        .welcome-header {
+            background: var(--unam-azul);
+            color: #fff;
+            padding: 28px 28px 20px;
+            text-align: center;
+        }
+        .welcome-header h2 { font-size: 1.35rem; margin-bottom: 6px; }
+        .welcome-header p  { opacity: .85; font-size: .9rem; margin: 0; }
+        .welcome-body { padding: 24px 28px; }
+        .welcome-steps {
+            list-style: none; padding: 0; margin: 0 0 20px;
+            display: flex; flex-direction: column; gap: 12px;
+        }
+        .welcome-steps li {
+            display: flex; align-items: flex-start; gap: 12px;
+            font-size: .9rem; color: #333;
+        }
+        .welcome-steps li .step-icon {
+            font-size: 1.4rem; flex-shrink: 0; margin-top: 1px;
+        }
+        .welcome-steps li strong { display: block; color: var(--unam-azul); }
+        .welcome-tip {
+            background: #f0f4ff;
+            border-left: 4px solid var(--unam-azul);
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-size: .82rem; color: #444;
+            margin-bottom: 20px;
+        }
+        .welcome-footer { text-align: center; }
+        .btn-welcome-start {
+            background: var(--unam-azul); color: #fff;
+            border: none; border-radius: 8px;
+            padding: 12px 36px; font-size: 1rem; font-weight: 600;
+            cursor: pointer; transition: background .2s;
+        }
+        .btn-welcome-start:hover { background: #1a237e; }
+        .welcome-skip {
+            display: block; margin-top: 10px;
+            font-size: .78rem; color: #999; cursor: pointer;
+            background: none; border: none;
+        }
+        .welcome-skip:hover { color: #555; }
+    </style>
+</head>
+
+<body>
+    <!-- WELCOME MODAL (oculto por defecto) -->
+    <div class="welcome-overlay" id="welcomeOverlay" style="display:none">
+        <div class="welcome-modal">
+            <div class="welcome-header">
+                <h2>👋 ¡Bienvenido/a a BOHR!</h2>
+                <p>Tu asistente de <strong>Estructura de la Materia</strong> — FESC UNAM</p>
+            </div>
+            <div class="welcome-body">
+                <ul class="welcome-steps">
+                    <li>
+                        <span class="step-icon">💬</span>
+                        <div><strong>Haz tus preguntas</strong>
+                        Escribe cualquier duda sobre física atómica, química cuántica u orbitales. BOHR busca en 7 libros de texto para responderte.</div>
+                    </li>
+                    <li>
+                        <span class="step-icon">🧮</span>
+                        <div><strong>Ecuaciones en LaTeX</strong>
+                        Las fórmulas se renderizan automáticamente. Si una expresión no se ve bien, recarga la página.</div>
+                    </li>
+                    <li>
+                        <span class="step-icon">📝</span>
+                        <div><strong>Exámenes formativos</strong>
+                        Después de explorar algunos temas, escribe <em>"Quiero un examen"</em> para poner a prueba lo que aprendiste.</div>
+                    </li>
+                    <li>
+                        <span class="step-icon">📈</span>
+                        <div><strong>Tu progreso</strong>
+                        En el panel izquierdo puedes ver tus consultas, niveles Bloom y temas explorados.</div>
+                    </li>
+                </ul>
+                <div class="welcome-tip">
+                    💡 <strong>Tip:</strong> Sé específico en tus preguntas — por ejemplo <em>"¿Cómo afecta el número cuántico de espín a la configuración electrónica?"</em> obtiene mejores respuestas que solo <em>"espín"</em>.
+                </div>
+                <div class="welcome-footer">
+                    <button class="btn-welcome-start" onclick="closeWelcome()">¡Empezar a estudiar!</button>
+                    <button class="btn-welcome-skip" onclick="closeWelcome()">Ya conozco el sistema</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AUTH SCREEN -->
+    <div class="auth-container" id="authScreen">
+        <div class="auth-left">
+            <div class="auth-branding">
+                <img src="logo-FESC.png" alt="FESC-UNAM"
+                    style="max-width: 250px; margin-bottom: 30px; filter: brightness(0) invert(1);">
+                <h1>🔬 Asistente de Estructura de la Materia</h1>
+                <p style="margin-top: 20px; font-size: 1.5em; opacity: 0.9;"><strong>FESC-UNAM</strong></p>
+            </div>
+        </div>
+        <div class="auth-right">
+            <div class="auth-form" id="loginForm">
+                <h2>Iniciar Sesión</h2>
+                <div class="error-message" id="loginError"></div>
+                <form onsubmit="handleLogin(event)">
+                    <div class="form-group"><label>Usuario</label><input type="text" id="loginUsername" required></div>
+                    <div class="form-group"><label>Contraseña</label><input type="password" id="loginPassword" required>
+                    </div>
+                    <button type="submit" class="btn" id="loginBtn">Ingresar</button>
+                </form>
+                <div class="auth-switch">¿No tienes cuenta? <a href="#" onclick="showRegister()">Regístrate aquí</a>
+                </div>
+            </div>
+            <div class="auth-form hidden" id="registerForm">
+                <h2>Crear Cuenta</h2>
+                <div class="error-message" id="registerError"></div>
+                <form onsubmit="handleRegister(event)">
+                    <div class="form-group"><label>Nombre completo</label><input type="text" id="registerFullName"
+                            required></div>
+                    <div class="form-group"><label>Usuario</label><input type="text" id="registerUsername" required>
+                    </div>
+                    <div class="form-group"><label>Email</label><input type="email" id="registerEmail" required></div>
+                    <div class="form-group"><label>Contraseña</label><input type="password" id="registerPassword"
+                            required minlength="6"></div>
+                    <button type="submit" class="btn" id="registerBtn">Registrarse</button>
+                </form>
+                <div class="auth-switch">¿Ya tienes cuenta? <a href="#" onclick="showLogin()">Inicia sesión</a></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP -->
+    <div class="app-container" id="appScreen">
+        <div class="app-header">
+            <button class="btn-sidebar-toggle" onclick="toggleSidebar()" aria-label="Menu">&#9776;</button>
+            <div class="app-title">
+                <h1>Asistente de Estructura de la Materia</h1>
+            </div>
+            <div class="user-info">
+                <button class="btn-analytics" onclick="showAnalytics()">📊 Analytics</button>
+                <span class="user-name" id="userName"></span>
+                <button class="btn-logout" onclick="logout()">Cerrar Sesión</button>
+            </div>
+        </div>
+        <div class="app-body">
+            <div class="sidebar">
+                <div class="sidebar-header"><button class="btn-new-chat" onclick="newConversation()">➕ Nueva
+                        Conversación</button></div>
+                <div class="conversations-list" id="conversationsList"></div>
+                <div class="progress-panel" id="progressPanel">
+                    <div class="progress-title">📈 Mi progreso</div>
+                    <div id="progressContent"><span class="progress-loading">Cargando…</span></div>
+                </div>
+            </div>
+            <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+            <div class="chat-container">
+                <div class="messages-container" id="messagesContainer">
+                    <div class="message assistant">
+                        <div class="message-header">
+                            <div class="message-avatar"><img src="pumas.png"></div>
+                            <span class="message-role">Asistente</span>
+                        </div>
+                        <div class="message-content">
+                            <p>¡Bienvenido! ¿En qué puedo ayudarte hoy?</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="input-area">
+                    <div class="input-wrapper">
+                        <textarea id="messageInput" placeholder="Escribe tu pregunta..." rows="1"
+                            onkeydown="handleKeyDown(event)"></textarea>
+                        <button class="btn-send" onclick="sendMessage()" id="sendBtn">Enviar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Config file for environment detection -->
+    <script src="config.js"></script>
+
+    <script>
+        let currentUser = null;
+        let currentConversationId = null;
+        let accessToken = null;
+
+        // Configurar marked
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            pedantic: false,
+            highlight: function (code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return code;
+            }
+        });
+
+        // FUNCIÓN MEJORADA: Renderizar con KaTeX auto-render
+        // Protege expresiones LaTeX de ser corrompidas por Marked.js
+        function renderContentWithLatex(content) {
+            // 1. Normalizar backslashes dobles que pueden venir del backend JSON
+            // \\( → \(  y  \\[ → \[
+            let processed = content;
+            processed = processed.replace(/\\\\(\(|\)|\[|\])/g, '\\$1');
+
+            // 2. Extraer y proteger expresiones LaTeX ANTES de Marked
+            const latexPlaceholders = [];
+
+            // Proteger bloques display $$...$$ (incluyendo multilínea)
+            processed = processed.replace(/\$\$([\s\S]*?)\$\$/g, (match) => {
+                const id = latexPlaceholders.length;
+                latexPlaceholders.push(match);
+                return `%%LATEX_DISPLAY_${id}%%`;
+            });
+
+            // Proteger bloques display \[...\]
+            processed = processed.replace(/\\\[([\s\S]*?)\\\]/g, (match) => {
+                const id = latexPlaceholders.length;
+                latexPlaceholders.push(match);
+                return `%%LATEX_DISPLAY_${id}%%`;
+            });
+
+            // Proteger inline $...$ (no vacíos, no escapados)
+            processed = processed.replace(/(?<!\$)\$(?!\$)([^\$\n]+?)\$(?!\$)/g, (match) => {
+                const id = latexPlaceholders.length;
+                latexPlaceholders.push(match);
+                return `%%LATEX_INLINE_${id}%%`;
+            });
+
+            // Proteger inline \(...\)
+            processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, (match) => {
+                const id = latexPlaceholders.length;
+                latexPlaceholders.push(match);
+                return `%%LATEX_INLINE_${id}%%`;
+            });
+
+            // 3. Procesar markdown
+            let htmlContent = marked.parse(processed);
+
+            // 4. Restaurar expresiones LaTeX
+            htmlContent = htmlContent.replace(/%%LATEX_DISPLAY_(\d+)%%/g, (_, id) => {
+                return latexPlaceholders[parseInt(id)];
+            });
+            htmlContent = htmlContent.replace(/%%LATEX_INLINE_(\d+)%%/g, (_, id) => {
+                return latexPlaceholders[parseInt(id)];
+            });
+
+            return htmlContent;
+        }
+
+        // NUEVA FUNCIÓN: Aplicar KaTeX a un elemento ya insertado en el DOM
+        function applyKatexToElement(element) {
+            // Esperar a que KaTeX esté cargado
+            const tryRender = () => {
+                if (window.renderMathInElement) {
+                    try {
+                        renderMathInElement(element, {
+                            delimiters: [
+                                { left: '$$', right: '$$', display: true },
+                                { left: '$', right: '$', display: false },
+                                { left: '\\[', right: '\\]', display: true },
+                                { left: '\\(', right: '\\)', display: false }
+                            ],
+                            throwOnError: false,
+                            strict: false,
+                            trust: true,
+                            // Opciones adicionales para manejar mejor el rendering
+                            ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre'],
+                            ignoredClasses: ['no-katex']
+                        });
+                    } catch (e) {
+                        console.error('KaTeX rendering error:', e);
+                    }
+                } else {
+                    // Si KaTeX no está cargado, esperar un poco y reintentar
+                    setTimeout(tryRender, 50);
+                }
+            };
+            tryRender();
+        }
+
+        // [Funciones de autenticación sin cambios]
+        function showLogin() {
+            document.getElementById('loginForm').classList.remove('hidden');
+            document.getElementById('registerForm').classList.add('hidden');
+        }
+
+        function showRegister() {
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('registerForm').classList.remove('hidden');
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('loginBtn');
+            const errorDiv = document.getElementById('loginError');
+            btn.disabled = true;
+            btn.textContent = 'Ingresando...';
+            errorDiv.style.display = 'none';
+            try {
+                const formData = new URLSearchParams();
+                formData.append('username', document.getElementById('loginUsername').value);
+                formData.append('password', document.getElementById('loginPassword').value);
+                const response = await fetch(`${API_URL}/token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formData
+                });
+                if (!response.ok) throw new Error('Credenciales incorrectas');
+                const data = await response.json();
+                accessToken = data.access_token;
+                currentUser = data.user;
+                localStorage.setItem('accessToken', accessToken);
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                showApp();
+            } catch (error) {
+                errorDiv.textContent = error.message;
+                errorDiv.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Ingresar';
+            }
+        }
+
+        async function handleRegister(e) {
+            e.preventDefault();
+            const btn = document.getElementById('registerBtn');
+            const errorDiv = document.getElementById('registerError');
+            btn.disabled = true;
+            btn.textContent = 'Registrando...';
+            errorDiv.style.display = 'none';
+            try {
+                const response = await fetch(`${API_URL}/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: document.getElementById('registerUsername').value,
+                        email: document.getElementById('registerEmail').value,
+                        password: document.getElementById('registerPassword').value,
+                        full_name: document.getElementById('registerFullName').value
+                    })
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Error al registrar');
+                }
+                alert('Cuenta creada. Ahora puedes iniciar sesión.');
+                showLogin();
+            } catch (error) {
+                errorDiv.textContent = error.message;
+                errorDiv.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Registrarse';
+            }
+        }
+
+        function logout() {
+            localStorage.clear();
+            location.reload();
+        }
+
+        async function showApp() {
+            document.getElementById('authScreen').style.display = 'none';
+            document.getElementById('appScreen').style.display = 'flex';
+            document.getElementById('userName').textContent = currentUser.full_name || currentUser.username;
+            const analyticsBtn = document.querySelector('.btn-analytics');
+            if (analyticsBtn) analyticsBtn.style.display = currentUser.is_admin ? 'inline-flex' : 'none';
+            loadConversations();
+            loadProgress();
+            maybeShowWelcome();
+        }
+
+        async function maybeShowWelcome() {
+            const key = `bohr_welcomed_${currentUser.id}`;
+            if (localStorage.getItem(key)) return;  // ya se mostró en este navegador
+            try {
+                const res = await fetch(`${API_URL}/me/progress`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                if (!res.ok) return;
+                const d = await res.json();
+                if (d.total_queries === 0) {
+                    document.getElementById('welcomeOverlay').style.display = 'flex';
+                }
+            } catch(e) { /* silencioso */ }
+        }
+
+        function closeWelcome() {
+            document.getElementById('welcomeOverlay').style.display = 'none';
+            localStorage.setItem(`bohr_welcomed_${currentUser.id}`, '1');
+        }
+
+        async function loadProgress() {
+            try {
+                const res = await fetch(`${API_URL}/me/progress`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                if (!res.ok) return;
+                const d = await res.json();
+
+                const bloomColors = {
+                    recordar: '#90caf9', comprender: '#64b5f6', aplicar: '#42a5f5',
+                    analizar: '#1e88e5', evaluar: '#1565c0', crear: '#0d47a1'
+                };
+                const bloomOrder = ['recordar','comprender','aplicar','analizar','evaluar','crear'];
+                const totalBloom = Object.values(d.bloom_distribution).reduce((a,b)=>a+b,0) || 1;
+                const totalCplx = Object.values(d.complexity_distribution).reduce((a,b)=>a+b,0) || 1;
+
+                const trendIcon = {comenzando:'🌱', progresando:'📈', avanzando:'🚀', estable:'✅'}[d.trend] || '📊';
+
+                let bloomBars = bloomOrder
+                    .filter(k => d.bloom_distribution[k])
+                    .map(k => {
+                        const pct = Math.round((d.bloom_distribution[k]/totalBloom)*100);
+                        return `<div class="progress-bar-wrap">
+                            <div class="progress-bar-label"><span>${k}</span><span>${d.bloom_distribution[k]}</span></div>
+                            <div class="progress-bar-track"><div class="progress-bar-fill" style="width:${pct}%;background:${bloomColors[k]||'#4C72B0'}"></div></div>
+                        </div>`;
+                    }).join('');
+
+                const cplx = d.complexity_distribution;
+                const cplxTotal = totalCplx;
+                const cplxBar = (label, key, color) => {
+                    const pct = Math.round(((cplx[key]||0)/cplxTotal)*100);
+                    return `<div class="progress-bar-wrap">
+                        <div class="progress-bar-label"><span>${label}</span><span>${cplx[key]||0}</span></div>
+                        <div class="progress-bar-track"><div class="progress-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+                    </div>`;
+                };
+
+                const topTopics = d.topics.slice(0,5).map(([t,n])=>
+                    `<span class="progress-topic-tag">${t.replace('_',' ')} (${n})</span>`
+                ).join('');
+
+                document.getElementById('progressContent').innerHTML = `
+                    <div class="progress-stat"><span>Consultas</span><span class="val">${d.total_queries}</span></div>
+                    <div class="progress-stat"><span>Exámenes</span><span class="val">${d.exams_completed}</span></div>
+                    ${bloomBars ? `<div style="margin-top:8px;font-weight:600;color:#555;font-size:0.78rem">Bloom</div>${bloomBars}` : ''}
+                    <div style="margin-top:8px;font-weight:600;color:#555;font-size:0.78rem">Complejidad</div>
+                    ${cplxBar('Básica','basic','#aec7e8')}
+                    ${cplxBar('Intermedia','intermediate','#4C72B0')}
+                    ${cplxBar('Avanzada','advanced','#1f4e8c')}
+                    ${topTopics ? `<div style="margin-top:6px;font-weight:600;color:#555;font-size:0.78rem">Temas</div><div class="progress-topics">${topTopics}</div>` : ''}
+                    <div class="progress-trend">${trendIcon} ${d.trend.charAt(0).toUpperCase()+d.trend.slice(1)}</div>
+                `;
+            } catch(e) {
+                document.getElementById('progressContent').innerHTML = '<span class="progress-loading">No disponible</span>';
+            }
+        }
+
+        async function loadConversations() {
+            try {
+                const response = await fetch(`${API_URL}/conversations`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                const conversations = await response.json();
+                const list = document.getElementById('conversationsList');
+                if (conversations.length === 0) {
+                    list.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">Sin conversaciones</div>';
+                    return;
+                }
+                list.innerHTML = conversations.map(conv => `
+                    <div class="conversation-item ${conv.id === currentConversationId ? 'active' : ''}" onclick="loadConversation(${conv.id})">
+                        <div class="conversation-title">${conv.title}</div>
+                        <div class="conversation-meta">${conv.message_count} mensajes • ${new Date(conv.updated_at).toLocaleDateString()}</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function loadConversation(convId) {
+            try {
+                const response = await fetch(`${API_URL}/conversations/${convId}`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                const conv = await response.json();
+                currentConversationId = convId;
+                const container = document.getElementById('messagesContainer');
+
+                // Cerrar sidebar en movil al cargar conversacion
+                closeSidebarMobile();
+
+                // Limpiar contenedor antes de agregar mensajes
+                container.innerHTML = '';
+
+                // Renderizar cada mensaje - detectar si es multi-source o formato antiguo
+                conv.messages.forEach(msg => {
+                    const isUser = msg.role === 'user';
+
+                    if (isUser) {
+                        // Mensaje del usuario - renderizado simple
+                        const messageDiv = document.createElement('div');
+                        messageDiv.className = 'message user';
+                        messageDiv.innerHTML = `
+                            <div class="message-header">
+                                <div class="message-avatar">👤</div>
+                                <span class="message-role">Tú</span>
+                            </div>
+                            <div class="message-content">${msg.content}</div>
+                        `;
+                        container.appendChild(messageDiv);
+                    } else {
+                        // Mensaje del asistente - detectar formato
+                        // El contenido puede ser:
+                        // 1. Formato nuevo: "**FUENTE 1**\n\nContenido...\n\n**FUENTE 2**..."
+                        // 2. Formato antiguo: texto interpretado normal
+
+                        const messageDiv = document.createElement('div');
+                        messageDiv.className = 'message assistant';
+
+                        const displayContent = renderContentWithLatex(msg.content);
+                        const sources = msg.sources || [];
+
+                        const footer = `
+                            <div class="message-footer">
+                                ${sources.length > 0 ? `<div class="message-sources">${sources.map(s => `<span class="source-tag">📄 ${s}</span>`).join('')}</div>` : ''}
+                                ${msg.response_time ? `<span class="response-time">⏱️ ${msg.response_time}s</span>` : ''}
+                                <div class="feedback-buttons">
+                                    <button class="btn-feedback ${msg.feedback === 1 ? 'active-positive' : ''}" onclick="submitFeedback(${msg.id}, 1)">👍</button>
+                                    <button class="btn-feedback ${msg.feedback === -1 ? 'active-negative' : ''}" onclick="submitFeedback(${msg.id}, -1)">👎</button>
+                                </div>
+                            </div>
+                        `;
+
+                        messageDiv.innerHTML = `
+                            <div class="message-header">
+                                <div class="message-avatar"><img src="pumas.png"></div>
+                                <span class="message-role">Asistente</span>
+                            </div>
+                            <div class="message-content">${displayContent}</div>
+                            ${footer}
+                        `;
+
+                        container.appendChild(messageDiv);
+
+                        // Aplicar KaTeX DESPUÉS de insertar en el DOM
+                        const contentElement = messageDiv.querySelector('.message-content');
+                        applyKatexToElement(contentElement);
+                    }
+                });
+
+                container.scrollTop = container.scrollHeight;
+                loadConversations();
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        function newConversation() {
+            currentConversationId = null;
+            closeSidebarMobile();
+            const container = document.getElementById('messagesContainer');
+            container.innerHTML = `
+                <div class="message assistant">
+                    <div class="message-header">
+                        <div class="message-avatar"><img src="pumas.png"></div>
+                        <span class="message-role">Asistente</span>
+                    </div>
+                    <div class="message-content"><p>Nueva conversación. ¿En qué puedo ayudarte?</p></div>
+                </div>
+            `;
+            document.getElementById('messageInput').focus();
+            loadConversations();
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            if (!message) return;
+            addMessage(message, 'user');
+            input.value = '';
+            const btn = document.getElementById('sendBtn');
+            btn.disabled = true;
+            input.disabled = true;
+            btn.textContent = 'Enviando...';
+
+            // Crear burbuja de respuesta vacía para ir llenando
+            const container = document.getElementById('messagesContainer');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message assistant';
+            msgDiv.innerHTML = `
+                <div class="message-header">
+                    <div class="message-avatar"><img src="pumas.png"></div>
+                    <span class="message-role">Asistente</span>
+                </div>
+                <div class="message-content streaming-content"><span class="typing-cursor">▍</span></div>
+                <div class="message-footer" id="streamFooter"></div>
+            `;
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+            const contentEl = msgDiv.querySelector('.message-content');
+
+            let rawText = '';
+
+            try {
+                const response = await fetch(`${API_URL}/query/stream`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: message,
+                        conversation_id: currentConversationId,
+                        top_k: 3
+                    })
+                });
+
+                if (!response.ok) throw new Error('Error al enviar mensaje');
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // última línea puede estar incompleta
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const payload = line.slice(6).trim();
+                        if (!payload) continue;
+                        try {
+                            const evt = JSON.parse(payload);
+                            if (evt.type === 'token') {
+                                rawText += evt.content;
+                                // Re-renderizar con LaTeX protegido
+                                contentEl.innerHTML = renderContentWithLatex(rawText) + '<span class="typing-cursor">▍</span>';
+                                applyKatexToElement(contentEl);
+                                container.scrollTop = container.scrollHeight;
+                            } else if (evt.type === 'meta') {
+                                currentConversationId = evt.conversation_id || currentConversationId;
+                                // Quitar cursor y renderizar versión final limpia
+                                contentEl.innerHTML = renderContentWithLatex(rawText);
+                                applyKatexToElement(contentEl);
+                                // Footer con fuentes y tiempo
+                                const footer = document.getElementById('streamFooter');
+                                if (footer) {
+                                    const srcs = (evt.sources || []).map(s => `<span class="source-tag">📄 ${s}</span>`).join('');
+                                    const t = evt.response_time ? `<span class="response-time">⏱️ ${evt.response_time}s</span>` : '';
+                                    const fb = evt.message_id ? `
+                                        <div class="feedback-buttons">
+                                            <button class="btn-feedback" onclick="submitFeedback(${evt.message_id}, 1)">👍</button>
+                                            <button class="btn-feedback" onclick="submitFeedback(${evt.message_id}, -1)">👎</button>
+                                        </div>` : '';
+                                    footer.innerHTML = `${srcs ? `<div class="message-sources">${srcs}</div>` : ''}${t}${fb}`;
+                                }
+                                loadConversations();
+                                loadProgress();
+                            } else if (evt.type === 'error') {
+                                contentEl.innerHTML = `❌ ${evt.detail}`;
+                            }
+                        } catch(e) { /* línea incompleta */ }
+                    }
+                }
+            } catch (error) {
+                contentEl.innerHTML = '❌ Error al procesar tu consulta.';
+                console.error(error);
+            } finally {
+                // Eliminar cursor si quedó
+                const cursor = contentEl.querySelector('.typing-cursor');
+                if (cursor) cursor.remove();
+                btn.disabled = false;
+                input.disabled = false;
+                btn.textContent = 'Enviar';
+                input.focus();
+            }
+        }
+
+        function addMultiSourceMessage(data, userQuery) {
+            const container = document.getElementById('messagesContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
+
+            // Construir contenido con 3 fuentes separadas
+            let content = `# 🔍 Resultados de búsqueda\n\n**Tu consulta:** ${userQuery}\n\n`;
+            content += `**Encontré ${data.total_sources} fuentes relevantes:**\n\n`;
+
+            data.multi_source_results.forEach(result => {
+                content += `## ${result.rank}. ${result.source_display}\n\n`;
+                content += `${result.content}\n\n`;
+                content += `*Relevancia: ${(result.relevance_score * 100).toFixed(0)}%*\n\n---\n\n`;
+            });
+
+            // Agregar mensaje de oferta de examen si aplica
+            if (data.should_offer_exam) {
+                content += `\n\n💡 **Has realizado varias consultas. ¿Te gustaría hacer una evaluación de los temas que has visto?**\n\n`;
+                content += `Escribe **"Quiero un examen"** si deseas evaluarte.\n\n`;
+            }
+
+            const displayContent = renderContentWithLatex(content);
+
+            // Footer con tiempo de respuesta
+            const footer = `
+                <div class="message-footer">
+                    ${data.response_time ? `<span class="response-time">⏱️ ${data.response_time}s</span>` : ''}
+                    ${data.message_id ? `
+                        <div class="feedback-buttons">
+                            <button class="btn-feedback" onclick="submitFeedback(${data.message_id}, 1)">👍</button>
+                            <button class="btn-feedback" onclick="submitFeedback(${data.message_id}, -1)">👎</button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            messageDiv.innerHTML = `
+                <div class="message-header">
+                    <div class="message-avatar"><img src="pumas.png"></div>
+                    <span class="message-role">Asistente</span>
+                </div>
+                <div class="message-content">${displayContent}</div>
+                ${footer}
+            `;
+
+            container.appendChild(messageDiv);
+
+            // Aplicar KaTeX DESPUÉS de insertar en el DOM
+            const contentElement = messageDiv.querySelector('.message-content');
+            applyKatexToElement(contentElement);
+
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function addMessage(content, role, meta = {}) {
+            const container = document.getElementById('messagesContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            const isUser = role === 'user';
+            const displayContent = isUser ? content : renderContentWithLatex(content);
+            let footer = '';
+            if (!isUser && meta.sources) {
+                footer = `
+                    <div class="message-footer">
+                        ${meta.sources.length > 0 ? `<div class="message-sources">${meta.sources.map(s => `<span class="source-tag">📄 ${s}</span>`).join('')}</div>` : ''}
+                        ${meta.responseTime ? `<span class="response-time">⏱️ ${meta.responseTime}s</span>` : ''}
+                        ${meta.messageId ? `
+                            <div class="feedback-buttons">
+                                <button class="btn-feedback" onclick="submitFeedback(${meta.messageId}, 1)">👍</button>
+                                <button class="btn-feedback" onclick="submitFeedback(${meta.messageId}, -1)">👎</button>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+            messageDiv.innerHTML = `
+                <div class="message-header">
+                    <div class="message-avatar">${isUser ? '👤' : '<img src="pumas.png">'}</div>
+                    <span class="message-role">${isUser ? 'Tú' : 'Asistente'}</span>
+                </div>
+                <div class="message-content">${displayContent}</div>
+                ${footer}
+            `;
+            container.appendChild(messageDiv);
+
+            // Aplicar KaTeX a mensajes del asistente DESPUÉS de insertar en el DOM
+            if (!isUser) {
+                const contentElement = messageDiv.querySelector('.message-content');
+                applyKatexToElement(contentElement);
+            }
+
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function submitFeedback(messageId, feedback) {
+            try {
+                await fetch(`${API_URL}/feedback`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message_id: messageId, feedback })
+                });
+                const buttons = document.querySelectorAll(`[onclick="submitFeedback(${messageId}, 1)"], [onclick="submitFeedback(${messageId}, -1)"]`);
+                buttons.forEach(btn => btn.classList.remove('active-positive', 'active-negative'));
+                event.target.classList.add(feedback === 1 ? 'active-positive' : 'active-negative');
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        function showAnalytics() {
+            window.open(`${API_URL}/analytics?token=${encodeURIComponent(accessToken)}`, '_blank');
+        }
+
+        // Sidebar toggle para movil
+        function toggleSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('active');
+        }
+
+        function closeSidebarMobile() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            sidebar.classList.remove('open');
+            overlay.classList.remove('active');
+        }
+
+        function handleKeyDown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        window.addEventListener('load', () => {
+            accessToken = localStorage.getItem('accessToken');
+            const userStr = localStorage.getItem('currentUser');
+            if (accessToken && userStr) {
+                currentUser = JSON.parse(userStr);
+                showApp();
+            }
+        });
+    </script>
+</body>
+
+</html>

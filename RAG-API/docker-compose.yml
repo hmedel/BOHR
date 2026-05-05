@@ -1,0 +1,16 @@
+services:
+  rag-api:
+    build: .
+    container_name: rag-api-custom
+    restart: "no"
+    network_mode: host
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./frontend:/app/frontend
+    environment:
+      - PYTHONUNBUFFERED=1
+
+volumes:
+  data:
+  logs:

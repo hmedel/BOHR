@@ -1,0 +1,80 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+ENV/
+env/
+.venv
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/rag_system.db
+data/chroma/
+
+# Uploads & Documents
+data/uploads/
+data/books/
+
+# Logs
+*.log
+logs/
+*.log.*
+nohup.out
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+.hypothesis/
+
+# Docker
+*.pid
+docker-compose.override.yml
+
+# Backups
+*.backup
+*.bak
+backups/
+
+# Misc
+julia-*.tar.gz
+node_modules/
+.npm
