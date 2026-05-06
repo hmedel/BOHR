@@ -6,6 +6,8 @@ Sistema educativo de Recuperación-Generación Aumentada (RAG) para el curso **E
 - Chat: [https://chat.bohrbot.space](https://chat.bohrbot.space)
 - API: [https://api.bohrbot.space](https://api.bohrbot.space)
 
+![Pantalla de login — BOHR FESC-UNAM](docs/screenshots/login.png)
+
 ---
 
 ## Proyecto PAPIME PE213525
@@ -35,6 +37,8 @@ El objetivo del proyecto es producir material de apoyo para la asignatura Estruc
 - **Historial persistente** — conversaciones guardadas y accesibles entre sesiones
 
 ---
+
+![Chat con respuesta LaTeX y panel de progreso](docs/screenshots/chat.png)
 
 ## Arquitectura
 
