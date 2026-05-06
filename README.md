@@ -8,6 +8,21 @@ Sistema educativo de Recuperación-Generación Aumentada (RAG) para el curso **E
 
 ---
 
+## Proyecto PAPIME PE213525
+
+Este sistema es un entregable del proyecto **PE213525** del **Programa de Apoyo para la Innovación y Mejoramiento de la Enseñanza (PAPIME)** de la UNAM, titulado:
+
+> *"Elaboración de material didáctico, problemario, videos y demostraciones en clase sobre el contenido de la asignatura Estructura de la Materia en la Facultad de Estudios Superiores Cuautitlán"*
+
+| Rol | Persona | Adscripción |
+|---|---|---|
+| Responsable del proyecto | Dr. Paul Olalde Velasco | FESC-UNAM, Sección Química Inorgánica |
+| Desarrollo e implementación del sistema de IA | Dr. Héctor Javier Medel Cobaxin | Instituto Tecnológico de Monterrey |
+
+El objetivo del proyecto es producir material de apoyo para la asignatura Estructura de la Materia. BOHR es la componente de inteligencia artificial: un asistente que permite a los estudiantes explorar el contenido bibliográfico del curso, autoevaluarse mediante exámenes adaptativos y recibir retroalimentación formativa basada en las taxonomías de Bloom y SOLO.
+
+---
+
 ## Características principales
 
 - **Búsqueda semántica** sobre 7 libros de física y química (11,800+ fragmentos indexados)
