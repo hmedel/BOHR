@@ -184,6 +184,36 @@ def get_active_exam(user_id: int, db: Session) -> Optional[Exam]:
     
     return latest_exam
 
+def should_offer_exam(conv_messages: list) -> bool:
+    """
+    Ofrece examen una sola vez por conversación cuando se cumplen:
+    - Al menos 5 preguntas del usuario en esta conversación
+    - Al menos 2 temas distintos detectados
+    - No se ha ofrecido antes (ningún mensaje del asistente contiene el trigger)
+    """
+    user_msgs = [m for m in conv_messages if m.role == "user"]
+    if len(user_msgs) < 5:
+        return False
+
+    # Verificar que no se haya ofrecido ya en esta conversación
+    trigger = "Quiero un examen"
+    already_offered = any(
+        trigger in (m.content or "") for m in conv_messages if m.role == "assistant"
+    )
+    if already_offered:
+        return False
+
+    # Contar temas distintos en los mensajes de usuario
+    topics = set()
+    for m in user_msgs:
+        if m.topics:
+            try:
+                topics.update(json.loads(m.topics))
+            except Exception:
+                pass
+    return len(topics) >= 2
+
+
 # ========== MAIN QUERY ENDPOINT ==========
 @app.get("/health")
 async def health():
@@ -621,14 +651,12 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
         # Usar respuesta sintetizada del LLM
         answer_display = synthesis_result["synthesized_answer"]
         
-        # Verificar si debe ofrecer examen (después de 3 consultas)
-        total_queries = len([m for m in conv.messages if m.role == "user"])
-        should_offer = total_queries >= 3 and total_queries % 3 == 0
-        
-        if should_offer:
+        # Ofrecer examen: ≥5 preguntas, ≥2 temas distintos, una sola vez por conversación
+        offer = should_offer_exam(conv.messages)
+        if offer:
             answer_display += "\n\n---\n\n"
-            answer_display += "💡 **Has realizado varias consultas. ¿Te gustaría hacer una evaluación de los temas que has visto?**\n\n"
-            answer_display += "Escribe **\"Quiero un examen\"** si deseas evaluarte.\n\n"
+            answer_display += "💡 **Has explorado varios temas en esta sesión. ¿Te gustaría hacer un examen formativo sobre lo que vimos?**\n\n"
+            answer_display += "Escribe **\"Quiero un examen\"** cuando estés listo.\n\n"
         
         # Guardar respuesta
         assistant_msg = Message(
@@ -675,9 +703,9 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
             "conversation_id": conv.id,
             "message_id": assistant_msg.id,
             "response_time": round(synthesis_result["response_time"], 2),
-            "should_offer_exam": should_offer
+            "should_offer_exam": offer
         }
-    
+
     except Exception as e:
         print(f"❌ Error: {str(e)}")
         import traceback
@@ -983,13 +1011,11 @@ async def query_stream(
             # Post-procesamiento
             full_text = rag_engine._remove_unicode_math_duplicates(full_text)
 
-            # Oferta de examen
-            total_user_msgs = db.query(Message).filter(
-                Message.conversation_id == conv.id, Message.role == "user"
-            ).count()
-            should_offer = total_user_msgs >= 3 and total_user_msgs % 3 == 0
-            if should_offer:
-                extra = "\n\n---\n\n💡 **¿Te gustaría hacer un examen sobre los temas que has visto?** Escribe **\"Quiero un examen\"**."
+            # Ofrecer examen: ≥5 preguntas, ≥2 temas distintos, una sola vez por conversación
+            db.refresh(conv)
+            offer = should_offer_exam(conv.messages)
+            if offer:
+                extra = "\n\n---\n\n💡 **Has explorado varios temas en esta sesión. ¿Te gustaría hacer un examen formativo sobre lo que vimos?** Escribe **\"Quiero un examen\"** cuando estés listo."
                 full_text += extra
                 yield f"data: {json.dumps({'type':'token','content':extra})}\n\n"
 
@@ -1017,7 +1043,7 @@ async def query_stream(
 
             meta = {"type": "meta", "conversation_id": conv.id,
                     "message_id": assistant_msg.id, "sources": sources_used,
-                    "response_time": response_time, "should_offer_exam": should_offer}
+                    "response_time": response_time, "should_offer_exam": offer}
             yield f"data: {json.dumps(meta)}\n\n"
             yield f"data: {json.dumps({'type':'done'})}\n\n"
 
