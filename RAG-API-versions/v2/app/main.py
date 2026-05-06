@@ -14,6 +14,9 @@ import json
 import time
 import re
 import sys
+import logging
+
+logger = logging.getLogger(__name__)
 import asyncio
 from pathlib import Path
 
@@ -301,25 +304,29 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                 if msg.topics:
                     try:
                         topics.update(json.loads(msg.topics))
-                    except:
-                        pass
+                    except Exception:
+                        logger.debug("topics JSON inválido en mensaje %s", msg.id)
             
             # Número fijo de preguntas: siempre 5
             total_questions = 5
 
-            # Calcular perfil de dificultad basado en exámenes anteriores
+            # Calcular perfil de dificultad basado en exámenes anteriores (batch, sin N+1)
             past_results = db.query(ExamResult).filter(ExamResult.user_id == current_user.id).all()
             past_exams_data = []
-            for res in past_results:
-                exam_ref = db.query(Exam).filter(Exam.id == res.exam_id).first()
-                if exam_ref:
-                    correct = sum(
-                        1 for r in db.query(ExamResponse).filter(
-                            ExamResponse.exam_id == exam_ref.id
-                        ).all()
-                        if json.loads(r.evaluation_data or "{}").get("is_correct", False)
-                    )
-                    past_exams_data.append({"correct": correct, "total": exam_ref.total_questions})
+            if past_results:
+                exam_ids = [r.exam_id for r in past_results]
+                exams_map = {e.id: e for e in db.query(Exam).filter(Exam.id.in_(exam_ids)).all()}
+                responses_map: dict = {}
+                for resp in db.query(ExamResponse).filter(ExamResponse.exam_id.in_(exam_ids)).all():
+                    responses_map.setdefault(resp.exam_id, []).append(resp)
+                for res in past_results:
+                    exam_ref = exams_map.get(res.exam_id)
+                    if exam_ref:
+                        correct = sum(
+                            1 for r in responses_map.get(exam_ref.id, [])
+                            if json.loads(r.evaluation_data or "{}").get("is_correct", False)
+                        )
+                        past_exams_data.append({"correct": correct, "total": exam_ref.total_questions})
 
             difficulty_profile = exam_engine.get_difficulty_profile(past_exams_data)
 
@@ -721,7 +728,8 @@ async def get_conversation(conv_id: int, current_user: User = Depends(get_curren
                         msg_dict["sources"] = sources_data
                 else:
                     msg_dict["sources"] = []
-            except:
+            except Exception:
+                logger.debug("sources JSON inválido en mensaje %s", m.id)
                 msg_dict["sources"] = []
         else:
             msg_dict["sources"] = []
@@ -788,6 +796,10 @@ async def get_my_progress(current_user: User = Depends(get_current_user), db: Se
         adv = sum(1 for m in recent if m.query_complexity == "advanced")
         trend = "avanzando" if adv >= 3 else "progresando" if adv >= 1 else "estable"
 
+    exam_active = db.query(Exam).filter(
+        Exam.user_id == current_user.id, Exam.status == "active"
+    ).first() is not None
+
     return {
         "total_queries": total,
         "topics": sorted(topics.items(), key=lambda x: -x[1]),
@@ -795,7 +807,54 @@ async def get_my_progress(current_user: User = Depends(get_current_user), db: Se
         "complexity_distribution": complexity_dist,
         "exams_completed": exams_done,
         "trend": trend,
+        "exam_active": exam_active,
     }
+
+
+@app.get("/me/progress/export")
+async def export_my_progress(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Exporta el historial completo del estudiante como CSV."""
+    import csv, io
+    msgs = (
+        db.query(Message)
+        .join(Conversation)
+        .filter(Conversation.user_id == current_user.id)
+        .order_by(Message.id)
+        .all()
+    )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["fecha", "rol", "contenido", "bloom_level", "complejidad", "sentimiento", "temas"])
+    for m in msgs:
+        writer.writerow([
+            m.created_at.isoformat() if m.created_at else "",
+            m.role,
+            (m.content or "")[:500],
+            m.bloom_level or "",
+            m.query_complexity or "",
+            m.sentiment_label or "",
+            m.topics or "",
+        ])
+    output.seek(0)
+    filename = f"progreso_{current_user.username.split('@')[0]}_{datetime.now().strftime('%Y%m%d')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@app.post("/me/exam/cancel")
+async def cancel_active_exam(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Cancela el examen activo del usuario si existe."""
+    active = db.query(Exam).filter(
+        Exam.user_id == current_user.id, Exam.status == "active"
+    ).first()
+    if not active:
+        raise HTTPException(status_code=404, detail="No hay examen activo")
+    active.status = "cancelled"
+    db.commit()
+    return {"status": "cancelled", "exam_id": active.id}
 
 
 # ========== ANALYTICS DASHBOARD ==========
