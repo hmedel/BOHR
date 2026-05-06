@@ -1,0 +1,12 @@
+VERSION=2.0
+DESCRIPTION="Sistema RAG completo - Con autenticación y historial"
+FEATURES="
+- 7 libros de química cargados
+- RAG con DeepSeek
+- Frontend mejorado (colores UNAM)
+- Sistema de login multiusuario
+- Historial persistente por usuario
+- Markdown con fórmulas
+"
+PORT_BACKEND=8000
+PORT_FRONTEND=9000

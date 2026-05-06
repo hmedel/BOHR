@@ -53,6 +53,20 @@ julia-*.tar.gz
 # ── LibreChat (proyecto separado, no versionar aquí) ─────────
 LibreChat/
 
+# ── Datos de estudiantes (privacidad) ────────────────────────
+RAG-API-versions/v2/*.csv
+RAG-API-versions/v2/exports/
+RAG-API-versions/v2/data/
+
+# ── Versiones antiguas y backups ─────────────────────────────
+RAG-API-versions/v1_backup_*/
+
+# ── rag_api (proyecto separado) ──────────────────────────────
+rag_api/
+
+# ── Archivos de migración generados ──────────────────────────
+RAG-API-versions/v2/migrations/
+
 # Backups y versiones antiguas de código
 *.backup*
 *.full_exam
