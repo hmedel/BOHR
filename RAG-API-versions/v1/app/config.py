@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     
     # DeepSeek Configuration
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
-    DEEPSEEK_API_KEY: str = "DEEPSEEK_API_KEY_REDACTED"
+    DEEPSEEK_API_KEY: str  # Required — set in .env, never hardcode
     LLM_MODEL: str = "deepseek-chat"
     LLM_MAX_TOKENS: int = 2000
     LLM_TEMPERATURE: float = 0.7
