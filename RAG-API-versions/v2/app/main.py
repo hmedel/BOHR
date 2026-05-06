@@ -323,19 +323,18 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                     "sources": []
                 }
             
-            # Crear nuevo examen
-            all_messages = db.query(Message).join(Conversation).filter(
-                Conversation.user_id == current_user.id,
-                Message.role == "user"
-            ).all()
-            
+            # Crear nuevo examen — temas de la conversación actual (esta sesión)
+            session_messages = [m for m in conv.messages if m.role == "user"]
             topics = set()
-            for msg in all_messages:
+            for msg in session_messages:
                 if msg.topics:
                     try:
                         topics.update(json.loads(msg.topics))
                     except Exception:
                         logger.debug("topics JSON inválido en mensaje %s", msg.id)
+
+            # Historial de mensajes de esta sesión para generar preguntas contextuales
+            all_messages = session_messages
             
             # Número fijo de preguntas: siempre 5
             total_questions = 5

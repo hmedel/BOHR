@@ -320,13 +320,36 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
         summary += f"""
 ---
 
-## 💡 Análisis Cualitativo
+## 💡 Revisión Detallada
 
-**Temas cubiertos en el examen:**
+"""
+        for i, qa in enumerate(questions_and_answers, 1):
+            q = qa.get("question", {})
+            ev = qa.get("evaluation", {})
+            is_correct = ev.get("is_correct", False)
+            icon = "✅" if is_correct else "❌"
+            enunciado = q.get("enunciado", "")
+            correct_letter = q.get("_respuesta_correcta", "")
+            opciones = q.get("opciones", [])
+
+            summary += f"### {icon} Pregunta {i} — {q.get('nivel_bloom','').title()}\n\n"
+            summary += f"{enunciado}\n\n"
+            if opciones:
+                for op in opciones:
+                    summary += f"{op}\n"
+                summary += "\n"
+            summary += f"**Tu respuesta:** {qa.get('answer','')}\n\n"
+            if not is_correct and correct_letter:
+                summary += f"**Respuesta correcta:** {correct_letter}\n\n"
+            summary += f"**Retroalimentación:** {ev.get('feedback','').splitlines()[1] if ev.get('feedback') else ''}\n\n---\n\n"
+
+        summary += f"""
+## 🗂️ Temas cubiertos
+
 """
         for topic in topics_covered[:5]:
-            summary += f"- {topic}\n"
-        
+            summary += f"- {topic.replace('_', ' ').title()}\n"
+
         # Fortalezas y áreas de mejora
         summary += """
 ---
