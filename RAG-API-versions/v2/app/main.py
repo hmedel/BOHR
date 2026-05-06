@@ -1,8 +1,11 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from typing import Optional, List, AsyncGenerator
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
@@ -25,11 +28,15 @@ from .analytics_engine import AnalyticsEngine
 from .qualitative_evaluator import QualitativeEvaluator
 from .exam_engine import ExamEngine
 
-app = FastAPI(title="Asistente de Estructura de la Materia", version="2.6")
+app = FastAPI(title="Asistente de Estructura de la Materia", version="2.7")
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://chat.bohrbot.space", "http://localhost:9000", "http://132.248.102.133:9000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -53,7 +60,7 @@ class Token(BaseModel):
     user: dict
 
 class QueryRequest(BaseModel):
-    query: str
+    query: str = Field(..., min_length=1, max_length=2000)
     conversation_id: Optional[int] = None
     top_k: Optional[int] = 5
     max_context: Optional[int] = 3000
@@ -65,7 +72,8 @@ class FeedbackRequest(BaseModel):
 
 # ========== AUTH ==========
 @app.post("/register")
-async def register(user: UserCreate, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == user.username).first():
         raise HTTPException(status_code=400, detail="Usuario ya existe")
     if db.query(User).filter(User.email == user.email).first():
@@ -84,7 +92,8 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     return {"message": "Usuario creado", "username": new_user.username}
 
 @app.post("/token", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+@limiter.limit("20/minute")
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
@@ -175,7 +184,7 @@ def get_active_exam(user_id: int, db: Session) -> Optional[Exam]:
 # ========== MAIN QUERY ENDPOINT ==========
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "2.6"}
+    return {"status": "healthy", "version": "2.7"}
 
 @app.post("/query")
 async def query(

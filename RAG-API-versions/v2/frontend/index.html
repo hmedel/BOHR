@@ -573,6 +573,15 @@
             color: #666;
         }
 
+        .error-message {
+            color: #c0392b;
+            background: #fdf0ef;
+            border-left: 3px solid #e74c3c;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 0.95em;
+        }
+
         .message-sources {
             display: flex;
             gap: 8px;
@@ -1545,6 +1554,9 @@
             let rawText = '';
 
             try {
+                const controller = new AbortController();
+                const streamTimeout = setTimeout(() => controller.abort(), 90000);
+
                 const response = await fetch(`${API_URL}/query/stream`, {
                     method: 'POST',
                     headers: {
@@ -1555,7 +1567,8 @@
                         query: message,
                         conversation_id: currentConversationId,
                         top_k: 3
-                    })
+                    }),
+                    signal: controller.signal
                 });
 
                 if (!response.ok) throw new Error('Error al enviar mensaje');
@@ -1566,7 +1579,7 @@
 
                 while (true) {
                     const { done, value } = await reader.read();
-                    if (done) break;
+                    if (done) { clearTimeout(streamTimeout); break; }
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split('\n');
                     buffer = lines.pop(); // última línea puede estar incompleta
@@ -1603,13 +1616,17 @@
                                 loadConversations();
                                 loadProgress();
                             } else if (evt.type === 'error') {
-                                contentEl.innerHTML = `❌ ${evt.detail}`;
+                                contentEl.innerHTML = `<div class="error-message">⚠️ ${evt.detail}</div>`;
                             }
                         } catch(e) { /* línea incompleta */ }
                     }
                 }
             } catch (error) {
-                contentEl.innerHTML = '❌ Error al procesar tu consulta.';
+                if (error.name === 'AbortError') {
+                    contentEl.innerHTML = '<div class="error-message">⏱️ La respuesta tardó demasiado. Intenta de nuevo.</div>';
+                } else {
+                    contentEl.innerHTML = '<div class="error-message">❌ Error al procesar tu consulta. Intenta de nuevo.</div>';
+                }
                 console.error(error);
             } finally {
                 // Eliminar cursor si quedó

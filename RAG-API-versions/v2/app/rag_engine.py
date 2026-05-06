@@ -83,24 +83,29 @@ class RAGEngine:
         """Llamada al LLM con temperatura configurable"""
         temp = temperature if temperature is not None else settings.LLM_TEMPERATURE
         
-        response = requests.post(
-            f"{settings.DEEPSEEK_BASE_URL}/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": settings.LLM_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": settings.LLM_MAX_TOKENS,
-                "temperature": temp
-            },
-            timeout=120
-        )
-        
+        try:
+            response = requests.post(
+                f"{settings.DEEPSEEK_BASE_URL}/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": settings.LLM_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": settings.LLM_MAX_TOKENS,
+                    "temperature": temp
+                },
+                timeout=60
+            )
+        except requests.Timeout:
+            raise Exception("El servicio de IA tardó demasiado en responder. Intenta de nuevo en unos momentos.")
+        except requests.ConnectionError:
+            raise Exception("No se pudo conectar al servicio de IA. Verifica la conexión e intenta de nuevo.")
+
         if response.status_code != 200:
             raise Exception(f"API error: {response.text}")
-        
+
         return response.json()["choices"][0]["message"]["content"]
     
     def _remove_unicode_math_duplicates(self, text: str) -> str:

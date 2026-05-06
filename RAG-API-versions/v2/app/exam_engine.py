@@ -209,7 +209,8 @@ GENERA SOLO EL JSON, SIN TEXTO ADICIONAL:"""
         # Determinar si es correcta (si es opción múltiple)
         if question.get("tipo") == "opcion_multiple":
             correct_letter = question.get("_respuesta_correcta", "").upper().strip()
-            student_letter = student_answer.strip().upper()[0] if student_answer else ""
+            cleaned = student_answer.strip().upper() if student_answer else ""
+            student_letter = cleaned[0] if cleaned else ""
             is_correct = (student_letter == correct_letter)
         
         # Criterios de evaluación
