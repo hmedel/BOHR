@@ -161,27 +161,29 @@ def is_exam_confirmation(query: str) -> bool:
             ('comenzar' in query_lower or 'empezar' in query_lower or 'iniciar' in query_lower))
 
 def get_active_exam(user_id: int, db: Session) -> Optional[Exam]:
-    """Obtener examen activo (sin completar) del usuario"""
-    # Buscar último examen
+    """Obtener examen activo (status=active y sin completar) del usuario"""
     latest_exam = db.query(Exam).filter(
-        Exam.user_id == user_id
+        Exam.user_id == user_id,
+        Exam.status == "active"
     ).order_by(Exam.created_at.desc()).first()
-    
+
     if not latest_exam:
         return None
-    
-    # Verificar si está completo
-    exam_data = json.loads(latest_exam.exam_data)
+
+    # Verificar si ya tiene todas las respuestas (debería estar completed, pero por si acaso)
+    exam_data = latest_exam.exam_data if isinstance(latest_exam.exam_data, dict) else json.loads(latest_exam.exam_data)
     total_q = exam_data.get("total_questions", 3)
-    
+
     responses_count = db.query(ExamResponse).filter(
         ExamResponse.exam_id == latest_exam.id
     ).count()
-    
-    # Si ya está completo, no es "activo"
+
     if responses_count >= total_q:
+        # Inconsistencia: marcar como completado
+        latest_exam.status = "completed"
+        db.commit()
         return None
-    
+
     return latest_exam
 
 def should_offer_exam(conv_messages: list) -> bool:
@@ -322,7 +324,14 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                     "answer": "Ya tienes un examen en progreso. Termínalo primero o cancélalo.",
                     "sources": []
                 }
-            
+
+            # Necesitamos conv para extraer los temas de la sesión
+            if not conv:
+                return {
+                    "answer": "No puedo iniciar el examen sin una conversación activa. Haz al menos una consulta primero.",
+                    "sources": []
+                }
+
             # Crear nuevo examen — temas de la conversación actual (esta sesión)
             session_messages = [m for m in conv.messages if m.role == "user"]
             topics = set()
@@ -972,21 +981,30 @@ async def query_stream(
 
             # Streaming del LLM token a token
             import requests as req_lib
-            with req_lib.post(
-                f"{settings.DEEPSEEK_BASE_URL}/v1/chat/completions",
-                headers={"Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
-                         "Content-Type": "application/json"},
-                json={"model": settings.LLM_MODEL,
-                      "messages": [{"role": "user", "content": synthesis_prompt}],
-                      "max_tokens": settings.LLM_MAX_TOKENS,
-                      "temperature": 0.5, "stream": True},
-                stream=True, timeout=180,
-            ) as llm_resp:
-                if llm_resp.status_code != 200:
-                    yield f"data: {json.dumps({'type':'error','detail':'Error LLM'})}\n\n"
+            try:
+                llm_response = req_lib.post(
+                    f"{settings.DEEPSEEK_BASE_URL}/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
+                             "Content-Type": "application/json"},
+                    json={"model": settings.LLM_MODEL,
+                          "messages": [{"role": "user", "content": synthesis_prompt}],
+                          "max_tokens": settings.LLM_MAX_TOKENS,
+                          "temperature": 0.5, "stream": True},
+                    stream=True, timeout=180,
+                )
+            except req_lib.exceptions.Timeout:
+                yield f"data: {json.dumps({'type':'error','detail':'El servicio de IA tardó demasiado. Intenta de nuevo en unos momentos.'})}\n\n"
+                return
+            except req_lib.exceptions.ConnectionError:
+                yield f"data: {json.dumps({'type':'error','detail':'No se pudo conectar al servicio de IA. Verifica la conexión.'})}\n\n"
+                return
+
+            with llm_response:
+                if llm_response.status_code != 200:
+                    yield f"data: {json.dumps({'type':'error','detail':'Error del servicio de IA. Intenta de nuevo.'})}\n\n"
                     return
 
-                for raw_line in llm_resp.iter_lines():
+                for raw_line in llm_response.iter_lines():
                     if not raw_line:
                         continue
                     line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
@@ -1055,13 +1073,22 @@ async def query_stream(
     )
 
 
-def _resolve_admin(token_qp: Optional[str], db: Session) -> User:
+def _resolve_admin(token_qp: Optional[str], db: Session, authorization: Optional[str] = None) -> User:
+    """Resuelve usuario admin desde Authorization header (preferido) o query param (legacy)."""
     from .auth import SECRET_KEY, ALGORITHM
     from jose import JWTError, jwt as jose_jwt
-    if not token_qp:
+
+    # Preferir header Authorization sobre query param (el QP expone el token en logs/historial)
+    raw_token = None
+    if authorization and authorization.startswith("Bearer "):
+        raw_token = authorization[7:]
+    elif token_qp:
+        raw_token = token_qp
+
+    if not raw_token:
         raise HTTPException(status_code=401, detail="Token requerido")
     try:
-        payload = jose_jwt.decode(token_qp, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jose_jwt.decode(raw_token, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")
     except JWTError:
         raise HTTPException(status_code=401, detail="Token inválido")
@@ -1074,10 +1101,12 @@ def _resolve_admin(token_qp: Optional[str], db: Session) -> User:
 
 @app.get("/analytics", response_class=HTMLResponse)
 async def analytics_dashboard(
+    request: Request,
     token: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    current_user = _resolve_admin(token, db)
+    authorization = request.headers.get("Authorization")
+    current_user = _resolve_admin(token, db, authorization=authorization)
 
     # Importar módulo de análisis dinámicamente para no requerir plotly en startup
     _v2_root = Path(__file__).parent.parent

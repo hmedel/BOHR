@@ -1797,7 +1797,25 @@
         }
 
         function showAnalytics() {
-            window.open(`${API_URL}/analytics?token=${encodeURIComponent(accessToken)}`, '_blank');
+            // Token enviado via POST a un endpoint que devuelve una URL de sesión temporal,
+            // evitando exponer el JWT en la URL (historial del navegador, logs de Cloudflare).
+            // Mientras tanto, abre en ventana nueva con token en header via fetch + blob URL.
+            fetch(`${API_URL}/analytics`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+            })
+            .then(r => {
+                if (r.status === 401) { alert('Acceso denegado: se requiere cuenta administrador.'); return null; }
+                if (!r.ok) { alert('Error al cargar el dashboard de analytics.'); return null; }
+                return r.blob();
+            })
+            .then(blob => {
+                if (!blob) return;
+                const url = URL.createObjectURL(blob);
+                const win = window.open(url, '_blank');
+                // Revocar el blob URL después de que la ventana cargue
+                if (win) win.addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
+            })
+            .catch(() => alert('No se pudo abrir el dashboard de analytics.'));
         }
 
         // Sidebar toggle para movil
