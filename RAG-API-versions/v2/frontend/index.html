@@ -1505,7 +1505,7 @@
                                 <div class="message-avatar">👤</div>
                                 <span class="message-role">Tú</span>
                             </div>
-                            <div class="message-content">${msg.content}</div>
+                            <div class="message-content">${msg.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}</div>
                         `;
                         container.appendChild(messageDiv);
                     } else {

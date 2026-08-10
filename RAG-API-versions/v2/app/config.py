@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     CHROMA_PATH: str = "./data/chroma"
     CHUNK_SIZE: int = 1500
     CHUNK_OVERLAP: int = 300
-    JWT_SECRET_KEY: Optional[str] = None  # Add JWT secret key field
+    JWT_SECRET_KEY: str  # Required — set in .env, never hardcode
     
     # Parámetros del LLM - BALANCE ENTRE PRECISIÓN Y ELABORACIÓN
     LLM_TEMPERATURE: float = 0.4  # Balance óptimo: elaboración moderada sin verbosidad

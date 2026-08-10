@@ -706,10 +706,8 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
         }
 
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error interno en /query: %s", str(e))
+        raise HTTPException(status_code=500, detail="Error interno del servidor. Intenta de nuevo en unos momentos.")
 
 # [Resto de endpoints sin cambios]
 @app.post("/feedback")
