@@ -7,9 +7,12 @@ import hashlib
 import time
 import json
 import re
+import logging
 from typing import List, Dict, Optional
 from collections import defaultdict
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 class RAGEngine:
     def __init__(self):
@@ -31,7 +34,7 @@ class RAGEngine:
         )
         
         self.available_docs = self._get_available_docs()
-        print(f"RAG Engine: {len(self.available_docs)} docs, temp={settings.LLM_TEMPERATURE}")
+        logger.info(f"RAG Engine: {len(self.available_docs)} docs, temp={settings.LLM_TEMPERATURE}")
     
     def _get_available_docs(self) -> List[str]:
         collection = self.vectorstore._collection
@@ -51,7 +54,7 @@ class RAGEngine:
         doc_id = hashlib.md5(filename.encode()).hexdigest()
         texts = self.text_splitter.split_text(content)
         
-        print(f"Total chunks: {len(texts)}")
+        logger.info(f"Total chunks: {len(texts)}")
         
         BATCH_SIZE = 20
         total_batches = (len(texts) + BATCH_SIZE - 1) // BATCH_SIZE
@@ -71,12 +74,12 @@ class RAGEngine:
             
             try:
                 self.vectorstore.add_documents(documents)
-                print(f"Batch {batch_num + 1}/{total_batches} OK")
+                logger.info(f"Batch {batch_num + 1}/{total_batches} OK")
                 time.sleep(0.5)
             except Exception as e:
-                print(f"Batch {batch_num + 1}/{total_batches} ERROR: {str(e)[:100]}")
+                logger.info(f"Batch {batch_num + 1}/{total_batches} ERROR: {str(e)[:100]}")
         
-        print(f"Documento completo: {len(texts)} chunks")
+        logger.info(f"Documento completo: {len(texts)} chunks")
         return doc_id
     
     def _call_llm(self, prompt: str, temperature: float = None) -> str:
@@ -188,7 +191,7 @@ class RAGEngine:
 
             if math_ratio > 0.6:
                 # La línea es mayoritariamente ecuación Unicode → eliminar
-                print(f"[POST-PROC] Eliminando línea ({math_ratio:.0%} math): {line[:80]}")
+                logger.debug(f"[POST-PROC] Eliminando línea ({math_ratio:.0%} math): {line[:80]}")
                 continue
             else:
                 # La línea tiene texto + ecuaciones Unicode inline → limpiar las ecuaciones
@@ -196,7 +199,7 @@ class RAGEngine:
                 for m in reversed(matches):  # reversed para no afectar índices
                     expr = m.group(0).strip()
                     if len(expr) > 3:  # Solo limpiar expresiones significativas
-                        print(f"[POST-PROC] Eliminando expr inline: {expr[:60]}")
+                        logger.debug(f"[POST-PROC] Eliminando expr inline: {expr[:60]}")
                         cleaned = cleaned[:m.start()] + cleaned[m.end():]
 
                 # Limpiar espacios dobles y paréntesis vacíos que queden
@@ -207,7 +210,7 @@ class RAGEngine:
                 if cleaned and len(cleaned) > 5:
                     cleaned_lines.append(cleaned)
                 else:
-                    print(f"[POST-PROC] Línea vacía después de limpiar, eliminando")
+                    logger.debug(f"[POST-PROC] Línea vacía después de limpiar, eliminando")
 
         # Paso 3: Restaurar bloques LaTeX protegidos
         result = '\n'.join(cleaned_lines)
@@ -268,7 +271,7 @@ class RAGEngine:
         sources_used = []
         results_by_source = {}
         
-        print(f"🔍 Búsqueda multi-fuente con síntesis: {len(available_docs)} docs disponibles")
+        logger.info(f"🔍 Búsqueda multi-fuente con síntesis: {len(available_docs)} docs disponibles")
         
         # PASO 1: Buscar EN CADA FUENTE por separado para garantizar diversidad
         for doc in available_docs:
@@ -285,12 +288,12 @@ class RAGEngine:
                 
                 if doc_results:
                     results_by_source[doc] = doc_results
-                    print(f"  ✓ {doc[:40]}: {len(doc_results)} chunks")
+                    logger.debug(f"  ✓ {doc[:40]}: {len(doc_results)} chunks")
                     
             except Exception as e:
-                print(f"  ✗ {doc[:40]}: Error - {str(e)[:50]}")
+                logger.warning(f"  ✗ {doc[:40]}: Error - {str(e)[:50]}")
         
-        print(f"  📚 Fuentes con resultados: {len(results_by_source)}")
+        logger.info(f"  📚 Fuentes con resultados: {len(results_by_source)}")
         
         # PASO 2: Ordenar fuentes por SCORE DE RELEVANCIA (suma de distancias)
         # Cada chunk tiene una distancia implícita - ChromaDB retorna los más cercanos primero
@@ -313,7 +316,7 @@ class RAGEngine:
         sources_to_use = min(sources_count, len(sorted_sources))
         top_sources = sorted_sources[:sources_to_use]
         
-        print(f"  🎯 Usando {sources_to_use} fuentes:")
+        logger.info(f"  🎯 Usando {sources_to_use} fuentes:")
         
         # PASO 4: Combinar contextos de las fuentes seleccionadas
         for rank, (source, results) in enumerate(top_sources, 1):
@@ -327,10 +330,10 @@ class RAGEngine:
                 contexts_by_source.append(f"**[Fuente {rank}: {source_name}]**\n{combined_content}")
                 sources_used.append(source_name)
                 
-                print(f"     {rank}. {source[:45]}: {len(results)} chunks")
+                logger.debug(f"     {rank}. {source[:45]}: {len(results)} chunks")
                 
             except Exception as e:
-                print(f"  ✗ {source[:40]}: Error - {str(e)[:50]}")
+                logger.warning(f"  ✗ {source[:40]}: Error - {str(e)[:50]}")
         
         # Combinar contextos
         full_context = "\n\n---\n\n".join(contexts_by_source)
@@ -507,7 +510,7 @@ Potencial: -Ze²/4πε₀rᵢ  ← PROHIBIDO: Unicode fuera de LaTeX
 
         response_time = time.time() - start_time
 
-        print(f"✅ Síntesis completada: {len(sources_used)} fuentes, {response_time:.2f}s")
+        logger.info(f"✅ Síntesis completada: {len(sources_used)} fuentes, {response_time:.2f}s")
 
         return {
             "synthesized_answer": synthesized_answer,
@@ -543,7 +546,7 @@ Potencial: -Ze²/4πε₀rᵢ  ← PROHIBIDO: Unicode fuera de LaTeX
             all_results = []
             chunks_per_book = 2
             
-            print(f"🔍 Búsqueda multi-libro: {len(self.available_docs)} docs")
+            logger.info(f"🔍 Búsqueda multi-libro: {len(self.available_docs)} docs")
             
             for doc in self.available_docs:
                 try:
@@ -553,9 +556,9 @@ Potencial: -Ze²/4πε₀rᵢ  ← PROHIBIDO: Unicode fuera de LaTeX
                         filter={"source": doc}
                     )
                     all_results.extend(doc_results)
-                    print(f"  • {doc[:40]}: {len(doc_results)} chunks")
+                    logger.debug(f"  • {doc[:40]}: {len(doc_results)} chunks")
                 except Exception as e:
-                    print(f"  ✗ {doc[:40]}: Error - {str(e)[:50]}")
+                    logger.warning(f"  ✗ {doc[:40]}: Error - {str(e)[:50]}")
             
             results = all_results
         
@@ -643,7 +646,7 @@ RESPONDE:"""
         response_time = time.time() - start_time
         unique_sources = list(set(sources))
         
-        print(f"✅ Respuesta: {len(unique_sources)} fuentes, {response_time:.2f}s")
+        logger.info(f"✅ Respuesta: {len(unique_sources)} fuentes, {response_time:.2f}s")
         
         return {
             "answer": answer,

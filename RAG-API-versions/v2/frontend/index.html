@@ -1148,6 +1148,20 @@
         let currentConversationId = null;
         let accessToken = null;
 
+        // Manejo centralizado de sesión expirada (401)
+        function handleAuthError(response) {
+            if (response && response.status === 401) {
+                localStorage.clear();
+                accessToken = null;
+                document.getElementById('appScreen').style.display = 'none';
+                document.getElementById('authScreen').style.display = 'flex';
+                document.getElementById('loginError').textContent = 'Tu sesión expiró. Inicia sesión de nuevo.';
+                document.getElementById('loginError').style.display = 'block';
+                return true;
+            }
+            return false;
+        }
+
         // Configurar marked
         marked.setOptions({
             breaks: true,
@@ -1362,6 +1376,7 @@
                 const res = await fetch(`${API_URL}/me/progress`, {
                     headers: { 'Authorization': `Bearer ${accessToken}` }
                 });
+                if (handleAuthError(res)) return;
                 if (!res.ok) return;
                 const d = await res.json();
 
@@ -1460,6 +1475,7 @@
                 const response = await fetch(`${API_URL}/conversations`, {
                     headers: { 'Authorization': `Bearer ${accessToken}` }
                 });
+                if (handleAuthError(response)) return;
                 const conversations = await response.json();
                 const list = document.getElementById('conversationsList');
                 if (conversations.length === 0) {
@@ -1685,60 +1701,6 @@
                 btn.textContent = 'Enviar';
                 input.focus();
             }
-        }
-
-        function addMultiSourceMessage(data, userQuery) {
-            const container = document.getElementById('messagesContainer');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = 'message assistant';
-
-            // Construir contenido con 3 fuentes separadas
-            let content = `# 🔍 Resultados de búsqueda\n\n**Tu consulta:** ${userQuery}\n\n`;
-            content += `**Encontré ${data.total_sources} fuentes relevantes:**\n\n`;
-
-            data.multi_source_results.forEach(result => {
-                content += `## ${result.rank}. ${result.source_display}\n\n`;
-                content += `${result.content}\n\n`;
-                content += `*Relevancia: ${(result.relevance_score * 100).toFixed(0)}%*\n\n---\n\n`;
-            });
-
-            // Agregar mensaje de oferta de examen si aplica
-            if (data.should_offer_exam) {
-                content += `\n\n💡 **Has realizado varias consultas. ¿Te gustaría hacer una evaluación de los temas que has visto?**\n\n`;
-                content += `Escribe **"Quiero un examen"** si deseas evaluarte.\n\n`;
-            }
-
-            const displayContent = renderContentWithLatex(content);
-
-            // Footer con tiempo de respuesta
-            const footer = `
-                <div class="message-footer">
-                    ${data.response_time ? `<span class="response-time">⏱️ ${data.response_time}s</span>` : ''}
-                    ${data.message_id ? `
-                        <div class="feedback-buttons">
-                            <button class="btn-feedback" onclick="submitFeedback(${data.message_id}, 1)">👍</button>
-                            <button class="btn-feedback" onclick="submitFeedback(${data.message_id}, -1)">👎</button>
-                        </div>
-                    ` : ''}
-                </div>
-            `;
-
-            messageDiv.innerHTML = `
-                <div class="message-header">
-                    <div class="message-avatar"><img src="pumas.png"></div>
-                    <span class="message-role">Asistente</span>
-                </div>
-                <div class="message-content">${displayContent}</div>
-                ${footer}
-            `;
-
-            container.appendChild(messageDiv);
-
-            // Aplicar KaTeX DESPUÉS de insertar en el DOM
-            const contentElement = messageDiv.querySelector('.message-content');
-            applyKatexToElement(contentElement);
-
-            container.scrollTop = container.scrollHeight;
         }
 
         function addMessage(content, role, meta = {}) {

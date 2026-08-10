@@ -192,15 +192,17 @@ def should_offer_exam(conv_messages: list) -> bool:
     - Al menos 5 preguntas del usuario en esta conversación
     - Al menos 2 temas distintos detectados
     - No se ha ofrecido antes (ningún mensaje del asistente contiene el trigger)
+    Limita la búsqueda del trigger a los últimos 20 mensajes para no ser O(n).
     """
     user_msgs = [m for m in conv_messages if m.role == "user"]
     if len(user_msgs) < 5:
         return False
 
-    # Verificar que no se haya ofrecido ya en esta conversación
+    # Buscar el trigger solo en los últimos 20 mensajes (O(1) acotado)
     trigger = "Quiero un examen"
+    recent = conv_messages[-20:]
     already_offered = any(
-        trigger in (m.content or "") for m in conv_messages if m.role == "assistant"
+        trigger in (m.content or "") for m in recent if m.role == "assistant"
     )
     if already_offered:
         return False
