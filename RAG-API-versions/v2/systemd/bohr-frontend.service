@@ -1,0 +1,16 @@
+[Unit]
+Description=BOHR Frontend (HTTP Server)
+After=network.target
+
+[Service]
+Type=simple
+User=medel
+WorkingDirectory=/home/medel/BOHR/RAG-API-versions/v2/frontend
+ExecStart=/usr/bin/python3 -m http.server 9000
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/medel/BOHR/RAG-API-versions/v2/logs/frontend_production.log
+StandardError=append:/home/medel/BOHR/RAG-API-versions/v2/logs/frontend_production.log
+
+[Install]
+WantedBy=multi-user.target

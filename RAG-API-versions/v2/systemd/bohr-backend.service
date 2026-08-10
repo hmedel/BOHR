@@ -1,0 +1,17 @@
+[Unit]
+Description=BOHR Backend (FastAPI/Uvicorn)
+After=network.target ollama.service
+Wants=ollama.service
+
+[Service]
+Type=simple
+User=medel
+WorkingDirectory=/home/medel/BOHR/RAG-API-versions/v2
+ExecStart=/home/medel/.julia/conda/3/x86_64/envs/bohrenv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4 --log-level info
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/medel/BOHR/RAG-API-versions/v2/logs/backend_production.log
+StandardError=append:/home/medel/BOHR/RAG-API-versions/v2/logs/backend_production.log
+
+[Install]
+WantedBy=multi-user.target
