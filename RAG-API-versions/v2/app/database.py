@@ -42,12 +42,12 @@ class Message(Base):
     __tablename__ = "messages"
     
     id = Column(Integer, primary_key=True, index=True)
-    conversation_id = Column(Integer, ForeignKey("conversations.id"))
-    role = Column(String)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), index=True)
+    role = Column(String, index=True)
     content = Column(Text)
     sources = Column(Text)
     context_used = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
     
     # Analytics
     feedback = Column(Integer, nullable=True)
@@ -60,9 +60,9 @@ class Message(Base):
     # Métricas de complejidad
     query_complexity = Column(String, nullable=True)  # basic, intermediate, advanced
     topics = Column(Text, nullable=True)  # JSON list de temas detectados
-    
+
     # Bloom taxonomy and SOLO taxonomy fields
-    bloom_level = Column(String, nullable=True)
+    bloom_level = Column(String, nullable=True, index=True)
     bloom_description = Column(Text, nullable=True)
     solo_level = Column(String, nullable=True)
     solo_characteristics = Column(JSON, nullable=True)

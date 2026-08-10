@@ -52,10 +52,10 @@ exam_engine = ExamEngine()
 
 # ========== MODELOS ==========
 class UserCreate(BaseModel):
-    username: str
-    email: str
-    password: str
-    full_name: Optional[str] = None
+    username: str = Field(..., min_length=3, max_length=100)
+    email: str = Field(..., pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+    password: str = Field(..., min_length=6, max_length=128)
+    full_name: Optional[str] = Field(None, max_length=150)
 
 class Token(BaseModel):
     access_token: str
@@ -222,7 +222,9 @@ async def health():
     return {"status": "healthy", "version": "2.7"}
 
 @app.post("/query")
+@limiter.limit("30/minute")
 async def query(
+    req: Request,
     request: QueryRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -690,7 +692,7 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
         progress = db.query(StudentProgress).filter(
             StudentProgress.user_id == current_user.id
         ).first()
-        
+
         if not progress:
             progress = StudentProgress(
                 user_id=current_user.id,
@@ -700,9 +702,22 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
             db.add(progress)
         else:
             progress.total_queries = (progress.total_queries or 0) + 1
-        
+
         progress.last_query_date = datetime.utcnow()
-        
+
+        # Actualizar distribución Bloom precalculada (evita recalcular en cada /me/progress)
+        bloom_dist = progress.bloom_distribution or {}
+        bloom_dist[bloom_level] = bloom_dist.get(bloom_level, 0) + 1
+        progress.bloom_distribution = bloom_dist
+
+        # Actualizar temas explorados
+        try:
+            current_topics = json.loads(progress.topics_explored) if progress.topics_explored else []
+        except Exception:
+            current_topics = []
+        merged = list(set(current_topics) | set(topics))
+        progress.topics_explored = json.dumps(merged)
+
         db.commit()
         
         return {
@@ -721,7 +736,13 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
 # [Resto de endpoints sin cambios]
 @app.post("/feedback")
 async def submit_feedback(feedback: FeedbackRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    message = db.query(Message).filter(Message.id == feedback.message_id).first()
+    # Verificar que el mensaje pertenece al usuario actual
+    message = (
+        db.query(Message)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .filter(Message.id == feedback.message_id, Conversation.user_id == current_user.id)
+        .first()
+    )
     if not message:
         raise HTTPException(status_code=404, detail="Mensaje no encontrado")
     message.feedback = feedback.feedback
@@ -894,7 +915,9 @@ async def cancel_active_exam(current_user: User = Depends(get_current_user), db:
 # ========== ANALYTICS DASHBOARD ==========
 # ========== STREAMING ENDPOINT ==========
 @app.post("/query/stream")
+@limiter.limit("30/minute")
 async def query_stream(
+    req: Request,
     request: QueryRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -1099,6 +1122,10 @@ def _resolve_admin(token_qp: Optional[str], db: Session, authorization: Optional
         raise HTTPException(status_code=403, detail="Solo administradores")
     return user
 
+# Caché simple en memoria para el dashboard de analytics (evita re-ejecutar en cada visita)
+_analytics_cache: dict = {"html": None, "ts": 0.0}
+_ANALYTICS_CACHE_TTL = 60  # segundos
+
 @app.get("/analytics", response_class=HTMLResponse)
 async def analytics_dashboard(
     request: Request,
@@ -1107,6 +1134,10 @@ async def analytics_dashboard(
 ):
     authorization = request.headers.get("Authorization")
     current_user = _resolve_admin(token, db, authorization=authorization)
+
+    # Devolver caché si está fresco
+    if _analytics_cache["html"] and (time.time() - _analytics_cache["ts"]) < _ANALYTICS_CACHE_TTL:
+        return HTMLResponse(content=_analytics_cache["html"])
 
     # Importar módulo de análisis dinámicamente para no requerir plotly en startup
     _v2_root = Path(__file__).parent.parent
@@ -1130,6 +1161,8 @@ async def analytics_dashboard(
         )
         charts = mod.make_charts(all_users, by_user, complexity, daily, daily_time, exam_responses)
         html = mod.build_html(all_users, by_user, daily_time, charts, exam_results)
+        _analytics_cache["html"] = html
+        _analytics_cache["ts"] = time.time()
         return HTMLResponse(content=html)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generando reporte: {e}")
