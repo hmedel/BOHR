@@ -30,6 +30,7 @@ from .auth import (
 from .analytics_engine import AnalyticsEngine
 from .qualitative_evaluator import QualitativeEvaluator
 from .exam_engine import ExamEngine
+from . import cache as rag_cache
 
 app = FastAPI(title="Asistente de Estructura de la Materia", version="2.7")
 
@@ -221,7 +222,7 @@ def should_offer_exam(conv_messages: list) -> bool:
 # ========== MAIN QUERY ENDPOINT ==========
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "2.7"}
+    return {"status": "healthy", "version": "2.8", "cache": rag_cache.get_stats()}
 
 @app.post("/query")
 @limiter.limit("30/minute")
@@ -650,13 +651,23 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
             for m in conv.messages[-6:]:
                 recent_history.append({"role": m.role, "content": m.content})
 
-        # RAG Multi-Source CON SÍNTESIS del LLM
-        synthesis_result = await rag_engine.query_multi_source_with_synthesis(
-            query=query_text,
-            sources_count=3,
-            chunks_per_source=10,
-            conversation_history=recent_history if len(recent_history) > 1 else None,
-        )
+        # ===== CACHÉ REDIS =====
+        # Solo cachear consultas sin historial previo (preguntas directas, no continuaciones)
+        use_cache = len(recent_history) <= 1
+        cached = rag_cache.get_cached(query_text) if use_cache else None
+
+        if cached:
+            synthesis_result = cached
+        else:
+            # RAG Multi-Source CON SÍNTESIS del LLM
+            synthesis_result = await rag_engine.query_multi_source_with_synthesis(
+                query=query_text,
+                sources_count=3,
+                conversation_history=recent_history if len(recent_history) > 1 else None,
+            )
+            # Guardar en caché solo respuestas limpias (sin examen activo)
+            if use_cache:
+                rag_cache.set_cached(query_text, synthesis_result)
         
         response_time = time.time() - start_time
         
