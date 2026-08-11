@@ -226,15 +226,15 @@ async def health():
 @app.post("/query")
 @limiter.limit("30/minute")
 async def query(
-    req: Request,
-    request: QueryRequest,
+    request: Request,
+    body: QueryRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     start_time = time.time()
     
     try:
-        query_text = request.query.strip()
+        query_text = body.query.strip()
         
         # ===== 1. DETECTAR SOLICITUD DE EXAMEN =====
         if is_exam_request(query_text):
@@ -260,9 +260,9 @@ Estás en la pregunta {current_q} de {total_q}.
             
             # Verificar si está listo para un examen
             conv = None
-            if request.conversation_id:
+            if body.conversation_id:
                 conv = db.query(Conversation).filter(
-                    Conversation.id == request.conversation_id,
+                    Conversation.id == body.conversation_id,
                     Conversation.user_id == current_user.id
                 ).first()
             
@@ -612,9 +612,9 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
         # ===== 5. FLUJO NORMAL DE RAG (Multi-Source) =====
         
         # Obtener o crear conversación
-        if request.conversation_id:
+        if body.conversation_id:
             conv = db.query(Conversation).filter(
-                Conversation.id == request.conversation_id,
+                Conversation.id == body.conversation_id,
                 Conversation.user_id == current_user.id
             ).first()
             if not conv:
@@ -919,8 +919,8 @@ async def cancel_active_exam(current_user: User = Depends(get_current_user), db:
 @app.post("/query/stream")
 @limiter.limit("30/minute")
 async def query_stream(
-    req: Request,
-    request: QueryRequest,
+    request: Request,
+    body: QueryRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -933,7 +933,7 @@ async def query_stream(
       data: {"type":"error","detail":"..."}
     Exámenes y flujos de estado se delegan a /query normal (no se streamean).
     """
-    query_text = request.query.strip()
+    query_text = body.query.strip()
 
     # Flujos de estado (examen, cancelar, confirmar) → delegar a /query normal sin streaming
     is_state_query = (
@@ -966,9 +966,9 @@ async def query_stream(
         full_text = ""
         try:
             # Conversación
-            if request.conversation_id:
+            if body.conversation_id:
                 conv = db.query(Conversation).filter(
-                    Conversation.id == request.conversation_id,
+                    Conversation.id == body.conversation_id,
                     Conversation.user_id == current_user.id
                 ).first()
                 if not conv:
