@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     
     # Parámetros del LLM - BALANCE ENTRE PRECISIÓN Y ELABORACIÓN
     LLM_TEMPERATURE: float = 0.4  # Balance óptimo: elaboración moderada sin verbosidad
-    LLM_MAX_TOKENS: int = 4000  # Suficiente para ecuaciones completas + explicación
+    LLM_MAX_TOKENS: int = 2500  # Suficiente para respuestas completas; bajar de 4000 reduce latencia ~20-30%
+    CHUNKS_PER_SOURCE: int = 7  # Chunks por fuente (bajado de 10); mantiene calidad, reduce contexto ~30%
     
     class Config:
         env_file = ".env"

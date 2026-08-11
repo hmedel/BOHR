@@ -231,7 +231,7 @@ class RAGEngine:
         self,
         query: str,
         sources_count: int = 3,
-        chunks_per_source: int = 10,
+        chunks_per_source: int = None,
         conversation_history: Optional[List[Dict]] = None,
         stream: bool = False,
     ) -> Dict:
@@ -252,9 +252,13 @@ class RAGEngine:
             }
         """
         from datetime import datetime
-        
+
+        # Resolver chunks_per_source desde config si no se pasó explícitamente
+        if chunks_per_source is None:
+            chunks_per_source = settings.CHUNKS_PER_SOURCE
+
         start_time = time.time()
-        
+
         # Obtener documentos disponibles
         available_docs = self.available_docs
         
