@@ -1,3 +1,6 @@
+# ── Documentos internos ──────────────────────────────────────
+BOHR_metodologia.md
+
 # ── Entornos y dependencias ──────────────────────────────────
 __pycache__/
 *.py[cod]
