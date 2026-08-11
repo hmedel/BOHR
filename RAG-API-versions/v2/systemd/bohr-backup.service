@@ -1,0 +1,16 @@
+[Unit]
+Description=BOHR Backup Loop (DB semanal + rotación de logs)
+After=bohr-backend.service
+
+[Service]
+Type=simple
+User=medel
+WorkingDirectory=/home/medel/BOHR/RAG-API-versions/v2
+ExecStart=/bin/bash /home/medel/BOHR/RAG-API-versions/v2/backup_loop.sh
+Restart=on-failure
+RestartSec=60
+StandardOutput=append:/home/medel/BOHR/RAG-API-versions/v2/logs/backup.log
+StandardError=append:/home/medel/BOHR/RAG-API-versions/v2/logs/backup.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+/home/medel/BOHR/RAG-API-versions/v2/logs/backend_production.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+
+/home/medel/BOHR/RAG-API-versions/v2/logs/cloudflare_tunnel.log
+/home/medel/BOHR/RAG-API-versions/v2/logs/frontend_production.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    copytruncate
+    size 10M
+}
+
+/home/medel/BOHR/RAG-API-versions/v2/logs/backup.log {
+    monthly
+    rotate 3
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
