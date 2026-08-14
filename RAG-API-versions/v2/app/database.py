@@ -67,7 +67,12 @@ class Message(Base):
     solo_level = Column(String, nullable=True)
     solo_characteristics = Column(JSON, nullable=True)
     qualitative_feedback = Column(Text, nullable=True)
-    
+
+    # Trazabilidad de la clasificación (P1.2)
+    # JSON con: classifier_version, model_version, prompt_version, classified_at
+    # Permite asociar cada bloom_level a la versión exacta del clasificador.
+    classifier_meta = Column(JSON, nullable=True)
+
     conversation = relationship("Conversation", back_populates="messages")
 
 class QueryLog(Base):

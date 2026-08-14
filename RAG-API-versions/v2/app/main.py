@@ -21,7 +21,7 @@ import asyncio
 from pathlib import Path
 
 from .rag_engine import RAGEngine
-from .config import settings
+from .config import settings, CLASSIFIER_VERSION, MODEL_VERSION, PROMPT_VERSION
 from .database import get_db, User, Conversation, Message, QueryLog, StudentProgress, Exam, ExamResponse, ExamResult
 from .auth import (
     get_password_hash, verify_password, create_access_token,
@@ -754,7 +754,17 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
         sentiment = analytics_engine.analyze_sentiment(query_text)
         topics = analytics_engine.detect_topics(query_text)
         complexity = analytics_engine.assess_complexity(query_text)
-        bloom_level, _ = qualitative_evaluator.classify_bloom_level(query_text)
+        bloom_level, bloom_desc = qualitative_evaluator.classify_bloom_level(query_text)
+
+        # Metadatos de trazabilidad (P1.2): versión del clasificador, del modelo
+        # y del prompt en el momento de la clasificación. Permiten reproducir o
+        # auditar cualquier clasificación Bloom en el contexto del estudio de validez.
+        _classifier_meta = {
+            "classifier_version": CLASSIFIER_VERSION,
+            "model_version": MODEL_VERSION,
+            "prompt_version": PROMPT_VERSION,
+            "classified_at": datetime.utcnow().isoformat() + "Z",
+        }
 
         user_msg = Message(
             conversation_id=conv.id,
@@ -765,6 +775,7 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
             query_complexity=complexity,
             topics=json.dumps(topics),
             bloom_level=bloom_level,
+            classifier_meta=_classifier_meta,
         )
         db.add(user_msg)
         db.commit()
@@ -1169,12 +1180,24 @@ async def export_bloom_coding(
             r"tengo duda|tengo una duda|no logro)\b", text, re.IGNORECASE
         ) else 0
 
+        # Extraer metadatos de trazabilidad (P1.2)
+        meta = m.classifier_meta or {}
+        cv = meta.get("classifier_version", "legacy")   # "legacy" si fue antes de P1.2
+        mv = meta.get("model_version", "unknown")
+        pv = meta.get("prompt_version", "unknown")
+        cl_at = meta.get("classified_at", "")
+
         included.append({
             "id_item": f"M{m.id}",
             "id_usuario": pseudonymize(uid),
             "texto_consulta": text,
             # bloom_level OMITIDO intencionalmente (codificacion ciega)
             "_bloom_auto": m.bloom_level or "no_clasificado",  # solo para separar muestras
+            # Trazabilidad: el codificador ve la version pero NO el nivel asignado
+            "classifier_version": cv,
+            "model_version": mv,
+            "prompt_version": pv,
+            "classified_at": cl_at,
             "multiparte": is_multiparte,
             "dependiente_contexto": is_dep_ctx,
             "expresion_dificultad": has_dificultad,
@@ -1199,9 +1222,13 @@ async def export_bloom_coding(
         comp_sample.extend(stratum[:sample_complement])
     rng.shuffle(comp_sample)
 
-    # Quitar columna interna _bloom_auto de los CSVs de salida
+    # Columnas del CSV de salida.
+    # _bloom_auto excluida (codificacion ciega).
+    # classifier_version, model_version, prompt_version, classified_at incluidas:
+    # el codificador no sabe el nivel, pero el articulo puede citar la version exacta.
     FIELDNAMES = [
         "id_item", "id_usuario", "texto_consulta",
+        "classifier_version", "model_version", "prompt_version", "classified_at",
         "multiparte", "dependiente_contexto", "expresion_dificultad",
         "confianza", "nota",
     ]
@@ -1253,16 +1280,31 @@ async def export_bloom_coding(
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"bloom_principal_seed{seed}_{ts}.csv", main_csv)
         zf.writestr(f"bloom_complementaria_seed{seed}_{ts}.csv", comp_csv)
-        # Estadisticas de exclusion en JSON para el artículo
+        # Estadisticas de muestreo + trazabilidad de versiones para el artículo
         import json as _json
+
+        # Distribución de versiones del clasificador en la muestra principal
+        # (útil para el artículo si hay mensajes "legacy" sin classifier_meta)
+        ver_dist: dict = {}
+        for r in main_sample:
+            cv_ = r.get("classifier_version", "legacy")
+            ver_dist[cv_] = ver_dist.get(cv_, 0) + 1
+
         stats = {
             "fecha_corte": ts,
             "semilla": seed,
+            # Versiones del sistema al momento del export
+            "sistema": {
+                "classifier_version": CLASSIFIER_VERSION,
+                "model_version": MODEL_VERSION,
+                "prompt_version": PROMPT_VERSION,
+            },
             "total_mensajes_usuario": len(all_user_msgs),
             "exclusiones": exclusion_counts,
             "incluidos_tras_exclusion": len(included),
             "muestra_principal_n": len(main_sample),
             "muestra_complementaria_n": len(comp_sample),
+            "distribucion_classifier_version_muestra_principal": ver_dist,
             "estratos_complementaria": {
                 lv: sum(1 for r in comp_sample if r["_bloom_auto"] == lv)
                 for lv in sorted(high_levels)
