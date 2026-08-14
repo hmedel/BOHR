@@ -1276,6 +1276,7 @@ async def export_bloom_coding(
             "expresion_dificultad": "",
             "confianza": "",
             "nota": "",
+            "sesion": "",   # el codificador anota el numero de sesion (1, 2, …)
         })
 
     # Conjunto piloto de entrenamiento.
@@ -1383,6 +1384,7 @@ async def export_bloom_coding(
         "proceso_cognitivo", "tipo_conocimiento",
         "multiparte", "dependiente_contexto", "expresion_dificultad",
         "confianza", "nota",
+        "sesion",   # el codificador anota el numero de sesion (1-6) para analisis de deriva
     ]
 
     def write_csv(rows: list, title: str, extra_header_lines: list) -> str:
@@ -1408,7 +1410,8 @@ async def export_bloom_coding(
             f"Exclusiones: {excl_summary}",
             f"INSTRUCCION: llenar proceso_cognitivo (R/C/AP/AN/E/CR/I), tipo_conocimiento,",
             f"  multiparte (0/1), dependiente_contexto (0/1), expresion_dificultad (0/1),",
-            f"  confianza (1=segura 2=dudosa) y nota si aplica.",
+            f"  confianza (1=segura 2=dudosa), nota si aplica, y sesion (1, 2, 3…).",
+            f"  Maximo 50 items por sesion. Registrar la sesion en cada fila al codificar.",
             f"  La columna bloom_level del clasificador NO aparece en este archivo.",
             f"  id_usuario tampoco aparece; la tabla de enlace item->usuario queda con el coordinador.",
             f"  classifier_version='legacy' significa que el item precede a la instrumentacion P1.2.",
@@ -1568,6 +1571,7 @@ async def export_bloom_coding(
             f"NO forman parte de ninguna muestra posterior (manual E.1).",
             f"Distribuir a ambos codificadores para calibracion conjunta antes de codificar.",
             f"Llenar las mismas columnas que en la muestra principal.",
+            f"La columna sesion puede quedar en blanco o marcarse como '0' (sesion de entrenamiento).",
         ],
     )
 

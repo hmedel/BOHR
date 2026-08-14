@@ -51,16 +51,21 @@ Con 150 ítems y seis categorías, el intervalo de confianza del kappa será amp
 - La columna con la salida del clasificador automático no aparece en el archivo de codificación.
 - El orden de los ítems se aleatoriza de forma distinta para cada codificador.
 - Se codifica solo el texto de la consulta. No se consulta la respuesta que dio el sistema ni el turno anterior, salvo en el caso previsto en la regla R7.
-- Sesiones de máximo 50 ítems para evitar deriva por fatiga.
+- Sesiones de máximo 50 ítems para evitar deriva por fatiga. Con 242 ítems, son aproximadamente 5 sesiones por codificador.
+- **Registrar el número de sesión** en la columna `sesion` de cada fila al codificar (1, 2, 3…). Esta información permite detectar deriva por fatiga en el análisis posterior: si el acuerdo cae consistentemente en las sesiones finales, es un resultado metodológico distinto de un desacuerdo genuino sobre los ítems.
 
 **Cómo obtener los archivos de codificación:**
 
 ```
+# Coordinador (ZIP completo: principal + piloto + complementaria + auditoria E5 + stats)
+GET /admin/export/bloom-coding?seed=42&coordinator=1    # para el coordinador
+
+# Codificadores (ZIP reducido: solo el CSV principal)
 GET /admin/export/bloom-coding?seed=42    # codificador 1
 GET /admin/export/bloom-coding?seed=99    # codificador 2
 ```
 
-El endpoint devuelve un ZIP con el CSV principal, el complementario y un JSON de estadísticas de muestreo. Requiere token de administrador.
+El endpoint requiere token de administrador. El ZIP del codificador contiene únicamente el CSV principal —sin estadísticas, sin pares de consistencia, sin ítems excluidos— para preservar el ciego. El coordinador debe distribuir solo el CSV a cada codificador, no el ZIP completo.
 
 ---
 
