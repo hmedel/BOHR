@@ -1293,45 +1293,10 @@ async def export_bloom_coding(
             "sesion": "",   # el codificador anota el numero de sesion (1, 2, …)
         })
 
-    # Conjunto piloto de entrenamiento.
-    # El manual (E.1) requiere 25 items que los codificadores trabajen juntos
-    # antes de codificar la muestra definitiva, y que NO formen parte de
-    # ninguna muestra posterior. Se apartan con seed fija (seed=0) para que
-    # sean siempre los mismos independientemente de la semilla del codificador.
-    # Se extraen ANTES de permutar la muestra principal.
-    _pilot_rng = _random.Random(0)
-    _pilot_pool = list(included)
-    _pilot_rng.shuffle(_pilot_pool)
-    pilot_sample = _pilot_pool[:25]
-    pilot_ids = {r["id_item"] for r in pilot_sample}
-
-    # Muestra principal = elegibles MENOS el piloto, permutada por semilla.
-    # La semilla determina el orden, no el subconjunto: ambos codificadores
-    # ven los mismos items en distinto orden (requisito del manual A.4).
-    #
-    # Complementaria: los items de estratos altos (analizar/evaluar/crear) forman
-    # parte de la muestra principal, no son disjuntos.
-    high_levels = {"analizar", "evaluar", "crear"}
-    main_sample = [r for r in included if r["id_item"] not in pilot_ids]
-    rng.shuffle(main_sample)        # permutacion por semilla
-
-    # Pares de consistencia intracodificador.
-    #
-    # TODOS los pares con similitud >= 0.95 se detectan y reciben separacion
-    # garantizada en la permutacion actual (semilla del codificador).
-    # Los primeros 4 pares no solapados se designan como pares de medicion
-    # de consistencia (etiquetas P1a/P1b ... P4a/P4b); el resto se reubica
-    # igualmente para que ningun par casi-identico quede contiguo, pero no
-    # se etiqueta (el coordinador los ve en la nota del JSON).
-    #
-    # La separacion se garantiza SOLO en el orden de la semilla actual.
-    # La semilla fija (42) determina cuales pares se etiquetan, no el orden.
-    # El endpoint reconstruye la permutacion de la semilla solicitada, por lo
-    # que cada llamada garantiza la separacion en su propio orden.
-    #
-    # Deteccion: semilla fija 42, independiente de la semilla del codificador.
+    # ── PASO 1: Detectar pares similares sobre el corpus completo elegible ──────
+    # Se hace ANTES del sorteo del piloto para que ningún par designado
+    # quede partido entre piloto y muestra principal.
     import difflib as _difflib
-    # Calcular normas si no estan ya
     for r in included:
         if "_norm" not in r:
             import unicodedata as _ud
@@ -1343,54 +1308,98 @@ async def export_bloom_coding(
             r["_norm"] = t
     _id_to_norm = {r["id_item"]: r["_norm"] for r in included}
 
-    # Detectar TODOS los pares sim >= 0.95 dentro de la muestra principal
-    _all_sim_pairs = []   # (sim, id1, id2) — todos, incluyendo no designados
-    _ms_ids = [r["id_item"] for r in main_sample]
-    for i in range(len(_ms_ids)):
-        for j in range(i + 1, len(_ms_ids)):
-            id1, id2 = _ms_ids[i], _ms_ids[j]
-            sim = _difflib.SequenceMatcher(None, _id_to_norm[id1], _id_to_norm[id2]).ratio()
-            if sim >= 0.95:
-                _all_sim_pairs.append((sim, id1, id2))
-    _all_sim_pairs.sort(reverse=True)
+    # Comparacion O(n²) sobre el corpus completo elegible (269 items ~ 36k pares)
+    _all_sim_pairs_full = []
+    _inc_ids = [r["id_item"] for r in included]
+    for _i in range(len(_inc_ids)):
+        for _j in range(_i + 1, len(_inc_ids)):
+            _id1, _id2 = _inc_ids[_i], _inc_ids[_j]
+            _sim = _difflib.SequenceMatcher(
+                None, _id_to_norm[_id1], _id_to_norm[_id2]
+            ).ratio()
+            if _sim >= 0.95:
+                _all_sim_pairs_full.append((_sim, _id1, _id2))
+    _all_sim_pairs_full.sort(reverse=True)
 
-    # Designar hasta 4 pares no solapados como pares de consistencia (semilla fija 42)
+    # Designar hasta 4 pares de consistencia (semilla fija 42, independiente
+    # de la semilla del codificador). Los items designados no entran al piloto.
     _used_designated = set()
     _chosen_pairs = {}   # {id_item: "P1a" | "P1b" | ...}
     _pair_num = 0
-    for sim, id1, id2 in _all_sim_pairs:
-        if id1 in _used_designated or id2 in _used_designated:
+    for _sim, _id1, _id2 in _all_sim_pairs_full:
+        if _id1 in _used_designated or _id2 in _used_designated:
             continue
         _pair_num += 1
-        _chosen_pairs[id1] = f"P{_pair_num}a"
-        _chosen_pairs[id2] = f"P{_pair_num}b"
-        _used_designated.update([id1, id2])
+        _chosen_pairs[_id1] = f"P{_pair_num}a"
+        _chosen_pairs[_id2] = f"P{_pair_num}b"
+        _used_designated.update([_id1, _id2])
         if _pair_num >= 4:
             break
 
-    # Construir posicion actual en la muestra
+    # ── PASO 2: Sorteo del piloto (seed fija 0) ──────────────────────────────
+    # Se excluyen del sorteo TODOS los items que tienen al menos un cuasi-duplicado
+    # (sim>=0.95) en el corpus, designados o no.
+    # Razon: si un item del piloto es cuasi-duplicado de uno de los 244 de la
+    # muestra principal, los codificadores lo discutiran en el entrenamiento y
+    # recordaran la discusion al codificar su gemelo. Eso contamina el acuerdo.
+    _all_items_in_pairs = set()
+    for _sim, _id1, _id2 in _all_sim_pairs_full:
+        _all_items_in_pairs.update([_id1, _id2])
+    _pilot_rng = _random.Random(0)
+    _pilot_pool = [r for r in included if r["id_item"] not in _all_items_in_pairs]
+    _pilot_rng.shuffle(_pilot_pool)
+    pilot_sample = _pilot_pool[:25]
+    pilot_ids = {r["id_item"] for r in pilot_sample}
+
+    # ── PASO 3: Muestra principal = elegibles MENOS piloto ───────────────────
+    # Los 8 items designados (4 pares) siempre estan aqui.
+    high_levels = {"analizar", "evaluar", "crear"}
+    main_sample = [r for r in included if r["id_item"] not in pilot_ids]
+    rng.shuffle(main_sample)   # permutacion por semilla del codificador
+
+    # ── PASO 4: Pares similares dentro de la muestra principal ───────────────
+    # Filtrar _all_sim_pairs_full a los que quedan en main_sample.
+    _main_ids_set = {r["id_item"] for r in main_sample}
+    _all_sim_pairs = [
+        (sim, id1, id2) for sim, id1, id2 in _all_sim_pairs_full
+        if id1 in _main_ids_set and id2 in _main_ids_set
+    ]
+
+    # ── PASO 5: Garantizar separacion >= 40 en el orden actual ───────────────
+    # Se aplica a TODOS los pares sim>=0.95 (no solo los 4 designados).
+    # Algoritmo: para cada par que viole la restriccion, mover el segundo
+    # miembro al primer hueco disponible que satisfaga la separacion.
+    # Iterar hasta convergencia o 10 pasadas.
+    _SEP_MIN = 40
     _id_to_pos = {r["id_item"]: i for i, r in enumerate(main_sample)}
 
-    # Garantizar separacion >= 40 para TODOS los pares con sim >= 0.95,
-    # no solo los 4 designados. Iterar hasta convergencia (max 3 pasadas).
-    _SEP_MIN = 40
-    for _pass in range(3):
-        _moved = False
-        for sim, id1, id2 in _all_sim_pairs:
-            ia, ib = _id_to_pos[id1], _id_to_pos[id2]
-            if abs(ia - ib) >= _SEP_MIN:
-                continue
-            # Mover el segundo miembro a posicion ia + SEP_MIN + 5, evitando
-            # colisionar con otros miembros del mismo par si los hubiera.
-            new_pos = min(ia + _SEP_MIN + 5, len(main_sample) - 1)
-            if new_pos == ib:
-                new_pos = max(0, ia - _SEP_MIN - 5)
-            if new_pos != ib:
-                main_sample[ib], main_sample[new_pos] = main_sample[new_pos], main_sample[ib]
-                _id_to_pos = {r["id_item"]: i for i, r in enumerate(main_sample)}
-                _moved = True
-        if not _moved:
-            break
+    def _enforce_separation(sample, sim_pairs, sep_min):
+        """Reubica items para garantizar separacion >= sep_min en todos los pares."""
+        id_to_pos = {r["id_item"]: i for i, r in enumerate(sample)}
+        N = len(sample)
+        for _pass in range(10):
+            moved = False
+            for _sim, _a, _b in sim_pairs:
+                ia, ib = id_to_pos[_a], id_to_pos[_b]
+                if abs(ia - ib) >= sep_min:
+                    continue
+                # Buscar posicion destino para _b: ia + sep_min + 5,
+                # o si esta al final, ia - sep_min - 5
+                candidate = ia + sep_min + 5
+                if candidate >= N:
+                    candidate = ia - sep_min - 5
+                if candidate < 0:
+                    candidate = N - 1
+                if candidate == ib:
+                    continue
+                sample[ib], sample[candidate] = sample[candidate], sample[ib]
+                id_to_pos = {r["id_item"]: i for i, r in enumerate(sample)}
+                moved = True
+            if not moved:
+                break
+        return id_to_pos
+
+    _id_to_pos = _enforce_separation(main_sample, _all_sim_pairs, _SEP_MIN)
 
     # Anotar _consistency_pair en los items (campo interno, excluido del CSV)
     for r in main_sample:
