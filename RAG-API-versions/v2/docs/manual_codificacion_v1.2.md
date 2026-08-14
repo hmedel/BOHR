@@ -516,11 +516,21 @@ El criterio es **léxico, no semántico**: la presencia de al menos uno de los t
 | Término | Razón de exclusión |
 |---------|-------------------|
 | Tokamak | Ingeniería de fusión nuclear aplicada; fuera del programa de Estructura de la Materia |
-| 4 fuerzas fundamentales | Física general introductoria; no es contenido específico del curso |
+| 4 fuerzas fundamentales | El fenómeno asociado (desintegración beta) entra; el mecanismo subyacente de física de partículas no. Ver regla de decisión abajo. |
 | Big Bang, materia oscura, gravedad cuántica | Cosmología y física de altas energías |
 | Velocidad de la luz en millas por hora | Conversión de unidades sin contexto químico identificable |
 
-La regla de decisión para casos nuevos es: el término debe hacer **imposible** que el mensaje sea conversación trivial ajena al programa de Estructura de la Materia de FESC-UNAM. Cuando la conexión con el curso es indirecta (la constante o el fenómeno *aparece* en el programa pero el mensaje no lo invoca en ese contexto), se excluye.
+**Regla de decisión para casos nuevos (v5):**
+
+> El término debe hacer imposible que el mensaje sea conversación trivial ajena al programa de Estructura de la Materia de FESC-UNAM.
+
+Dos sub-reglas que resuelven los casos límite:
+
+1. **El fenómeno entra; el mecanismo subyacente de física de partículas no.** La desintegración beta es contenido del programa → los mensajes sobre radioactividad, desintegración, nucleones, radiación alfa/beta entran. La interacción débil, mecanismo de esa desintegración, es física de partículas → «cuáles son las 4 fuerzas fundamentales» se excluye aunque la pregunta pueda motivarse por ese vínculo.
+
+2. **La ingeniería de aplicación queda fuera.** La fusión nuclear es contenido del programa (defecto de masa, nucleones, energía de ligadura) → mensajes sobre fisión y fusión entran. El tokamak es una aplicación de ingeniería de esa física → se excluye.
+
+Si una pregunta nueva no puede resolverse por estas dos sub-reglas, el coordinador decide y documenta el caso en la columna `nota` de la auditoría E5.
 
 ## A.2 Historial de versiones
 
