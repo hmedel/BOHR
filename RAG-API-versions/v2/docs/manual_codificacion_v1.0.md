@@ -163,6 +163,16 @@ SOLO describe la **estructura** de una respuesta en relación con una tarea. No 
 
 **El enunciado fija el techo alcanzable.** Una respuesta no puede ser relacional si la tarea no admite relacionar. Por eso SOLO solo se codifica sobre respuestas a los reactivos abiertos de la Parte D, nunca sobre conversación libre.
 
+> **Nota metodológica — Bloom y SOLO son escalas independientes.**  
+> El sistema BOHR registra el nivel Bloom de la *pregunta* (inferido del verbo
+> de la consulta) y el nivel SOLO de la *respuesta* (codificado manualmente sobre
+> los reactivos de la Parte D). Cualquier mapeo entre ambas escalas —por ejemplo,
+> asumir que una pregunta de nivel *analizar* espera una respuesta *relacional*—
+> es un **supuesto de los autores de este sistema**, no una correspondencia
+> establecida por Anderson y Krathwohl (2001) ni por Biggs y Collis (1982).
+> Los datos de este estudio no permiten concluir que ambas taxonomías estén
+> correlacionadas. Esa hipótesis requeriría un diseño de investigación separado.
+
 ## C.2 Los cinco niveles, operacionalizados
 
 **Preestructural.** No aborda la tarea. Repite el enunciado, usa elementos irrelevantes, o es incoherente. Incluye «no sé» y equivalentes.

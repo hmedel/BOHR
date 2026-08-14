@@ -32,7 +32,7 @@ from .qualitative_evaluator import QualitativeEvaluator
 from .exam_engine import ExamEngine
 from . import cache as rag_cache
 
-app = FastAPI(title="Asistente de Estructura de la Materia", version="2.7")
+app = FastAPI(title="Asistente de Estructura de la Materia", version="2.8")
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
