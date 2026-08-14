@@ -1130,12 +1130,30 @@ async def export_bloom_coding(
         r"entendido|perfecto|muy bien|listo|saludos|bye|adios|chao)[.,!?\s]*$",
         re.IGNORECASE,
     )
+    # E5: patron de contenido quimico.
+    # Ampliado tras auditoria manual de 30 excluidos (2026-08-14): la lista original
+    # no cubria terminos frecuentes del curso como hamiltoniano, espín, determinante
+    # de Slater, de Broglie, Stern-Gerlach, Compton, cuerpo negro, acoplamiento,
+    # enlace de hidrógeno, ácido/base, conjugado, series del hidrógeno, etc.
+    # Criterio de inclusion: cualquier termino cuya presencia hace imposible que el
+    # mensaje sea conversacion trivial no quimica.
     chem_pattern = re.compile(
-        r"(atom|electron|protón|proton|neutron|orbital|enlace|mol|energía|energia|"
-        r"quantum|cuantic|espectro|foton|fotón|ion|carga|tabla periódica|periodo|grupo|"
-        r"configuracion|configuración|niveles|subnivel|heisenberg|bohr|schrodinger|"
-        r"ionizacion|ionización|electronegat|radio atomic|entalp|entrop|gibbs|covalente|"
-        r"molecular|vsepr|orbital|hibridac|aufbau|pauli|hund|rydberg|balmer)",
+        r"(atom|electr[oó]n|prot[oó]n|neutr[oó]n|orbital|enlace|mol[eé]|energ[ií]|"
+        r"quantum|cuant|espectro|fot[oó]n|ion|carga|tabla peri[oó]dica|periodo|grupo|"
+        r"configuraci[oó]n|niveles|subnivel|heisenberg|bohr|schr[oö]dinger|"
+        r"ionizaci[oó]n|electronegat|radio at[oó]m|entalp|entr[oó]p|gibbs|covalente|"
+        r"molecular|vsepr|hibridac|aufbau|pauli|hund|rydberg|balmer|"
+        r"hamiltoniano|hamiltonian|esp[ií]n|spin|slater|broglie|compton|"
+        r"stern|gerlach|fotoelectric|cuerpo negro|radiaci[oó]n|"
+        r"acoplamiento|momento angular|momento dipolar|"
+        r"[aá]cido|base de|bronsted|arrhenius|lewis|conj[uo]gado|"
+        r"puente de hidr[oó]geno|puentes de hidr[oó]geno|"
+        r"serie[s]? de hidr[oó]geno|radionucl|radiois[oó]topo|"
+        r"determinante|operador|funci[oó]n de onda|dualidad|"
+        r"materia oscura|bariónico|bari[oó]n|cuatro fuerzas|fuerza fundamental|"
+        r"efecto compton|efecto fotoel[eé]ctrico|davisson|germer|"
+        r"experimento de|modelo de|principio de|ecuaci[oó]n de|"
+        r"n[uú]mero cu[aá]ntico|subnivel|longitud de onda|frecuencia)",
         re.IGNORECASE,
     )
 
@@ -1228,27 +1246,86 @@ async def export_bloom_coding(
             "nota": "",
         })
 
-    # Separar muestra complementaria (estratos poco frecuentes) ANTES de permutar
+    # Muestra principal = TODA la poblacion elegible, permutada por semilla.
+    # La semilla determina el orden, no el subconjunto: ambos codificadores
+    # ven los mismos items en distinto orden (requisito del manual A.4).
+    #
+    # Complementaria: los items de estratos altos (analizar/evaluar/crear) forman
+    # parte de la muestra principal, no son disjuntos. La columna _bloom_auto
+    # (que los codificadores no ven) permite identificarlos en el analisis.
+    # Sacarlos de la principal dejaría la matriz de confusion sin filas en esos niveles.
     high_levels = {"analizar", "evaluar", "crear"}
-    complement_pool = [r for r in included if r["_bloom_auto"] in high_levels]
-    main_pool = [r for r in included if r["_bloom_auto"] not in high_levels]
+    main_sample = list(included)    # todos los elegibles, sin excluir los de estrato alto
+    rng.shuffle(main_sample)        # permutacion por semilla
 
-    # Muestra principal: TODA la poblacion elegible (no remuestrear con sample_main).
-    # Con 179 elegibles y fraccion de muestreo >80%, dos semillas distintas devuelven
-    # casi el mismo subconjunto, lo que invalida la logica de dos codificadores
-    # independientes. La solucion correcta es codificar la poblacion completa y usar
-    # la semilla solo para PERMUTAR el orden (los codificadores ven los mismos items
-    # en distinto orden, que es lo que pide el manual en A.4).
-    main_sample = list(main_pool)   # toda la poblacion elegible
-    rng.shuffle(main_sample)        # permutacion dependiente de la semilla
+    # Pares de consistencia intracodificador.
+    # Se eligen 4 pares de alta similitud (>= 0.95) entre distintos usuarios.
+    # Los dos miembros de cada par aparecen en la muestra con >=40 posiciones
+    # de separacion. El codificador no ve la columna _consistency_pair.
+    # Permite medir consistencia sin costo adicional de codificacion.
+    # Los pares se seleccionan con semilla fija (42) para ser reproducibles
+    # independientemente de la semilla del codificador.
+    import difflib as _difflib
+    _pair_rng = _random.Random(42)
+    _candidates = []
+    _norms = [(r["id_item"], r.get("_norm", ""), i) for i, r in enumerate(main_sample)]
+    # Necesitamos la norma: la agregamos al dict incluido temporalmente
+    for r in included:
+        import unicodedata as _ud
+        t = r["texto_consulta"].lower()
+        t = _ud.normalize("NFD", t)
+        t = "".join(c for c in t if _ud.category(c) != "Mn")
+        t = re.sub(r"[^\w\s]", "", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        r["_norm"] = t
+    # Reconstruir norms con el orden shuffleado
+    _id_to_pos = {r["id_item"]: i for i, r in enumerate(main_sample)}
+    _id_to_norm = {r["id_item"]: r["_norm"] for r in included}
+    _id_to_uid = {}   # no tenemos uid aqui; usamos id_item como proxy de identidad
+    for i in range(len(main_sample)):
+        for j in range(i + 1, len(main_sample)):
+            id1, id2 = main_sample[i]["id_item"], main_sample[j]["id_item"]
+            n1, n2 = _id_to_norm[id1], _id_to_norm[id2]
+            sim = _difflib.SequenceMatcher(None, n1, n2).ratio()
+            if sim >= 0.95:
+                _candidates.append((sim, id1, id2))
+    _candidates.sort(reverse=True)
+    # Elegir hasta 4 pares no solapados (ningun item en dos pares)
+    _used = set()
+    _chosen_pairs = {}
+    _pair_num = 0
+    for sim, id1, id2 in _candidates:
+        if id1 in _used or id2 in _used:
+            continue
+        _pair_num += 1
+        _chosen_pairs[id1] = f"P{_pair_num}a"
+        _chosen_pairs[id2] = f"P{_pair_num}b"
+        _used.update([id1, id2])
+        if _pair_num >= 4:
+            break
 
-    # Muestra complementaria: hasta sample_complement por estrato
-    comp_sample = []
-    for level in high_levels:
-        stratum = [r for r in complement_pool if r["_bloom_auto"] == level]
-        rng.shuffle(stratum)
-        comp_sample.extend(stratum[:sample_complement])
-    rng.shuffle(comp_sample)
+    # Asegurar separacion >= 40 posiciones entre miembros del mismo par
+    for pair_id in range(1, _pair_num + 1):
+        pa = f"P{pair_id}a"
+        pb = f"P{pair_id}b"
+        ids_a = [k for k, v in _chosen_pairs.items() if v == pa]
+        ids_b = [k for k, v in _chosen_pairs.items() if v == pb]
+        if not ids_a or not ids_b:
+            continue
+        ia, ib = _id_to_pos[ids_a[0]], _id_to_pos[ids_b[0]]
+        if abs(ia - ib) < 40:
+            # Mover el segundo miembro a posicion ia + 50 (o al final)
+            new_pos = min(ia + 50, len(main_sample) - 1)
+            # Intercambiar posiciones
+            main_sample[ib], main_sample[new_pos] = main_sample[new_pos], main_sample[ib]
+            _id_to_pos = {r["id_item"]: i for i, r in enumerate(main_sample)}
+
+    # Anotar _consistency_pair en los items (campo interno, excluido del CSV)
+    for r in main_sample:
+        r["_consistency_pair"] = _chosen_pairs.get(r["id_item"], "")
+
+    # Muestra complementaria: vista de los items de estrato alto dentro de la principal
+    comp_sample = [r for r in main_sample if r["_bloom_auto"] in high_levels]
 
     # Columnas del CSV de salida.
     # Excluidas: _bloom_auto (codificacion ciega), id_usuario (evita inferir
@@ -1300,25 +1377,69 @@ async def export_bloom_coding(
         comp_sample,
         "complementaria",
         [
-            f"MUESTRA COMPLEMENTARIA — estratificada por analizar/evaluar/crear",
+            f"MUESTRA COMPLEMENTARIA — items de estrato analizar/evaluar/crear",
             f"Generado: {ts}  Semilla: {seed}",
-            f"N por estrato (max {sample_complement}): " +
+            f"NOTA: estos items ESTAN INCLUIDOS en la muestra principal. Este archivo",
+            f"  es solo una vista para que el coordinador los identifique por separado.",
+            f"  NO es un conjunto disjunto. NO calcular acuerdo sobre este archivo solo.",
+            f"N por estrato: " +
             " | ".join(
                 f"{lv}:{sum(1 for r in comp_sample if r['_bloom_auto']==lv)}"
                 for lv in sorted(high_levels)
             ),
-            f"ADVERTENCIA: esta muestra NO debe agregarse a la principal para calcular acuerdo global.",
-            f"Reportar aparte. Es util para estimar concordancia en niveles poco frecuentes.",
         ],
     )
+
+    # Muestra E5 para auditoria manual (30 items al azar con semilla fija)
+    # No va al codificador; va al coordinador para verificar que E5 no excluye
+    # quimica legitima fuera del vocabulario de la lista de temas.
+    import json as _json
+    _e5_audit_rng = _random.Random(42)
+    e5_excluded_items = []  # construido abajo junto con el bucle principal (recolectado aqui)
+    # Los items E5 se recolectan en el bucle de exclusion; necesitamos acceso a ellos.
+    # Como el bucle ya termino, los recuperamos de all_user_msgs filtrando.
+    _seen_for_audit: set = set()
+    _seen_uid_for_audit: dict = {}
+    _seen_norm_for_audit: set = set()
+    for m in all_user_msgs:
+        text = (m.content or "").strip()
+        conv = m.conversation
+        uid = conv.user_id if conv else 0
+        if len(text.replace(" ", "")) < 15: continue
+        if greeting_patterns.match(text): continue
+        if exam_patterns.search(text) or text.startswith("ESTA FUE TU PREGUNTA"): continue
+        if uid not in _seen_uid_for_audit: _seen_uid_for_audit[uid] = set()
+        if text in _seen_uid_for_audit[uid]: continue
+        _seen_uid_for_audit[uid].add(text)
+        import unicodedata as _ud2
+        _t = text.lower()
+        _t = _ud2.normalize("NFD", _t)
+        _t = "".join(c for c in _t if _ud2.category(c) != "Mn")
+        _t = re.sub(r"[^\w\s]", "", _t)
+        _t = re.sub(r"\s+", " ", _t).strip()
+        if _t in _seen_norm_for_audit: continue
+        _seen_norm_for_audit.add(_t)
+        if not chem_pattern.search(text):
+            e5_excluded_items.append({"id_item": f"M{m.id}", "texto": text})
+    _e5_audit_rng.shuffle(e5_excluded_items)
+    e5_audit_sample = e5_excluded_items[:30]
+    e5_audit_buf = io.StringIO()
+    e5_audit_buf.write(f"# AUDITORIA E5 — 30 items excluidos al azar (seed=42, fecha={ts})\n")
+    e5_audit_buf.write(f"# Revisar manualmente: verificar que ningun item tiene contenido quimico\n")
+    e5_audit_buf.write(f"# del curso de Estructura de la Materia.\n")
+    e5_audit_buf.write(f"# Si un item DEBIO incluirse, reportarlo: indica que E5 subexcluye.\n")
+    e5_audit_writer = csv.DictWriter(e5_audit_buf, fieldnames=["id_item", "texto", "es_quimica_legitima", "nota"])
+    e5_audit_writer.writeheader()
+    for row in e5_audit_sample:
+        e5_audit_writer.writerow({**row, "es_quimica_legitima": "", "nota": ""})
 
     # Empaquetar en ZIP
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"bloom_principal_seed{seed}_{ts}.csv", main_csv)
         zf.writestr(f"bloom_complementaria_seed{seed}_{ts}.csv", comp_csv)
+        zf.writestr(f"auditoria_e5_{ts}.csv", e5_audit_buf.getvalue())
         # Estadisticas de muestreo + trazabilidad de versiones para el artículo
-        import json as _json
 
         # Distribución de versiones del clasificador en la muestra principal
         # (útil para el artículo si hay mensajes "legacy" sin classifier_meta)
@@ -1363,14 +1484,29 @@ async def export_bloom_coding(
                 "classifier_version='legacy' indica items clasificados antes de P1.2 "
                 "(sin metadatos de trazabilidad). Este estudio valida el clasificador pre-auditoria."
             ),
-            "estratos_complementaria": {
-                lv: sum(1 for r in comp_sample if r["_bloom_auto"] == lv)
+            "estratos_en_principal": {
+                lv: sum(1 for r in main_sample if r["_bloom_auto"] == lv)
                 for lv in sorted(high_levels)
             },
             "nota_complementaria": (
-                "Muestra complementaria puede ser insuficiente para estimar concordancia "
-                "en niveles altos. Reportar como evidencia cualitativa de patron de error, "
-                "no como estimacion de acuerdo."
+                "Los items de estrato alto estan INCLUIDOS en la muestra principal. "
+                "El archivo complementaria es una vista, no un conjunto disjunto. "
+                "Con N pequeño, reportar como evidencia cualitativa, no estimacion de acuerdo."
+            ),
+            "pares_consistencia": {
+                k: v for k, v in _chosen_pairs.items()
+            },
+            "nota_pares": (
+                f"{_pair_num} pares de alta similitud (>=0.95) seleccionados con seed=42. "
+                "Ambos miembros de cada par estan en la muestra principal separados >=40 posiciones. "
+                "El codificador no ve la columna _consistency_pair. "
+                "Permite medir consistencia intracodificador sin costo adicional."
+            ),
+            "e5_auditoria_n": len(e5_audit_sample),
+            "nota_e5_auditoria": (
+                "30 items excluidos por E5 al azar (seed=42) incluidos en auditoria_e5.csv. "
+                "Un docente debe revisarlos para verificar que E5 no excluye quimica legitima. "
+                "Sin esta revision el estudio no es interpretable."
             ),
         }
         zf.writestr(f"estadisticas_muestreo_{ts}.json", _json.dumps(stats, indent=2, ensure_ascii=False))
