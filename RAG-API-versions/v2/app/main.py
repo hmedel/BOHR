@@ -1139,15 +1139,30 @@ async def export_bloom_coding(
         re.IGNORECASE,
     )
 
-    exclusion_counts = {"E1": 0, "E2": 0, "E3": 0, "E4": 0, "E5": 0}
-    seen_texts: dict[int, set] = {}  # user_pseudo -> set de textos vistos
+    # Normalizacion para E4 cross-user: minusculas, sin acentos, sin puntuacion
+    def _normalize(t: str) -> str:
+        import unicodedata
+        t = t.lower()
+        t = unicodedata.normalize("NFD", t)
+        t = "".join(c for c in t if unicodedata.category(c) != "Mn")
+        t = re.sub(r"[^\w\s]", "", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    exclusion_counts = {"E1": 0, "E2": 0, "E3": 0, "E4_same": 0, "E4_cross": 0, "E5": 0}
+    # E4_same: duplicado exacto del mismo usuario
+    # E4_cross: texto normalizado ya visto en otro usuario (enunciado de tarea)
+    seen_by_user: dict[int, set] = {}   # uid -> set(texto_original)
+    seen_normalized: set = set()        # textos normalizados cross-user
+
     included = []
 
     for m in all_user_msgs:
         text = (m.content or "").strip()
         conv = m.conversation
+        uid = conv.user_id if conv else 0
 
-        # E1: menos de 15 caracteres
+        # E1: menos de 15 caracteres (se aplica ANTES que E5 para que el desglose sea correcto)
         if len(text.replace(" ", "")) < 15:
             exclusion_counts["E1"] += 1
             continue
@@ -1155,64 +1170,77 @@ async def export_bloom_coding(
         if greeting_patterns.match(text):
             exclusion_counts["E2"] += 1
             continue
-        # E3: interaccion con el sistema de examen
-        if exam_patterns.search(text):
+        # E3: interaccion con el sistema de examen, o respuesta a pregunta de examen
+        # (el sistema de examen puede insertar el prefijo "ESTA FUE TU PREGUNTA:" en mensajes
+        # de seguimiento; esos no son consultas espontaneas)
+        if exam_patterns.search(text) or text.startswith("ESTA FUE TU PREGUNTA"):
             exclusion_counts["E3"] += 1
             continue
-        # E4: duplicado exacto del mismo usuario (distancia 0)
-        uid = conv.user_id if conv else 0
-        if uid not in seen_texts:
-            seen_texts[uid] = set()
-        if text in seen_texts[uid]:
-            exclusion_counts["E4"] += 1
+        # E4-same: duplicado exacto del mismo usuario
+        if uid not in seen_by_user:
+            seen_by_user[uid] = set()
+        if text in seen_by_user[uid]:
+            exclusion_counts["E4_same"] += 1
             continue
-        seen_texts[uid].add(text)
+        seen_by_user[uid].add(text)
+        # E4-cross: mismo enunciado normalizado ya visto en otro usuario
+        norm = _normalize(text)
+        if norm in seen_normalized:
+            exclusion_counts["E4_cross"] += 1
+            continue
+        seen_normalized.add(norm)
         # E5: sin contenido quimico identificable
         if not chem_pattern.search(text):
             exclusion_counts["E5"] += 1
             continue
 
-        # Detectar marcadores de metadatos (columnas de trabajo)
-        is_multiparte = 1 if text.count("?") > 1 else 0
-        is_dep_ctx = 1 if re.match(r"^(y |¿y |pero |entonces |y eso |en ese caso)", text, re.IGNORECASE) else 0
-        has_dificultad = 1 if re.search(
-            r"\b(no entiendo|no comprendo|estoy perdido|me confunde|no sé|no se|"
-            r"tengo duda|tengo una duda|no logro)\b", text, re.IGNORECASE
-        ) else 0
-
         # Extraer metadatos de trazabilidad (P1.2)
         meta = m.classifier_meta or {}
         cv = meta.get("classifier_version", "legacy")   # "legacy" si fue antes de P1.2
-        mv = meta.get("model_version", "unknown")
-        pv = meta.get("prompt_version", "unknown")
+        mv = meta.get("model_version", "legacy")
+        pv = meta.get("prompt_version", "legacy")
         cl_at = meta.get("classified_at", "")
 
         included.append({
             "id_item": f"M{m.id}",
-            "id_usuario": pseudonymize(uid),
+            # id_usuario OMITIDO: permite inferir que dos items son del mismo estudiante,
+            # introduciendo dependencia perceptible en la codificacion ciega.
+            # La tabla de enlace id_item -> id_usuario queda en poder del coordinador.
             "texto_consulta": text,
             # bloom_level OMITIDO intencionalmente (codificacion ciega)
-            "_bloom_auto": m.bloom_level or "no_clasificado",  # solo para separar muestras
-            # Trazabilidad: el codificador ve la version pero NO el nivel asignado
+            "_bloom_auto": m.bloom_level or "no_clasificado",  # solo para separar estratos
+            # Trazabilidad de version: el codificador ve la version del clasificador
+            # pero NO el nivel que asigno. "legacy" = anterior a P1.2 (sin metadatos).
             "classifier_version": cv,
             "model_version": mv,
             "prompt_version": pv,
             "classified_at": cl_at,
-            "multiparte": is_multiparte,
-            "dependiente_contexto": is_dep_ctx,
-            "expresion_dificultad": has_dificultad,
+            # Columnas de codificacion: vacias. Las auxiliares (multiparte,
+            # dependiente_contexto) no se prellena; son decision del codificador
+            # segun R5 y R7. Solo expresion_dificultad es detectable automaticamente
+            # y aun asi se deja en blanco para no condicionar.
+            "proceso_cognitivo": "",
+            "tipo_conocimiento": "",
+            "multiparte": "",
+            "dependiente_contexto": "",
+            "expresion_dificultad": "",
             "confianza": "",
             "nota": "",
         })
 
-    # Separar muestra complementaria (estratos poco frecuentes) ANTES de aleatorizar
+    # Separar muestra complementaria (estratos poco frecuentes) ANTES de permutar
     high_levels = {"analizar", "evaluar", "crear"}
     complement_pool = [r for r in included if r["_bloom_auto"] in high_levels]
     main_pool = [r for r in included if r["_bloom_auto"] not in high_levels]
 
-    # Muestra principal: aleatorizar y tomar min(sample_main, disponibles)
-    rng.shuffle(main_pool)
-    main_sample = main_pool[:sample_main]
+    # Muestra principal: TODA la poblacion elegible (no remuestrear con sample_main).
+    # Con 179 elegibles y fraccion de muestreo >80%, dos semillas distintas devuelven
+    # casi el mismo subconjunto, lo que invalida la logica de dos codificadores
+    # independientes. La solucion correcta es codificar la poblacion completa y usar
+    # la semilla solo para PERMUTAR el orden (los codificadores ven los mismos items
+    # en distinto orden, que es lo que pide el manual en A.4).
+    main_sample = list(main_pool)   # toda la poblacion elegible
+    rng.shuffle(main_sample)        # permutacion dependiente de la semilla
 
     # Muestra complementaria: hasta sample_complement por estrato
     comp_sample = []
@@ -1223,12 +1251,17 @@ async def export_bloom_coding(
     rng.shuffle(comp_sample)
 
     # Columnas del CSV de salida.
-    # _bloom_auto excluida (codificacion ciega).
-    # classifier_version, model_version, prompt_version, classified_at incluidas:
-    # el codificador no sabe el nivel, pero el articulo puede citar la version exacta.
+    # Excluidas: _bloom_auto (codificacion ciega), id_usuario (evita inferir
+    #   dependencia entre items del mismo estudiante — tabla de enlace con coordinador).
+    # proceso_cognitivo y tipo_conocimiento: vacias, son las que el codificador llena.
+    # Auxiliares multiparte/dependiente_contexto/expresion_dificultad: vacias;
+    #   son decision del codificador (R5, R7, R8), no deteccion automatica.
+    # classifier_version/model_version/prompt_version/classified_at: metadatos de
+    #   trazabilidad para el articulo; "legacy" cuando el item precede a P1.2.
     FIELDNAMES = [
-        "id_item", "id_usuario", "texto_consulta",
+        "id_item", "texto_consulta",
         "classifier_version", "model_version", "prompt_version", "classified_at",
+        "proceso_cognitivo", "tipo_conocimiento",
         "multiparte", "dependiente_contexto", "expresion_dificultad",
         "confianza", "nota",
     ]
@@ -1250,12 +1283,16 @@ async def export_bloom_coding(
         main_sample,
         "principal",
         [
-            f"MUESTRA PRINCIPAL — codificacion ciega Bloom",
-            f"Generado: {ts}  Semilla: {seed}",
-            f"N incluidos tras exclusiones: {len(included)}  N muestra: {len(main_sample)}",
+            f"MUESTRA PRINCIPAL — codificacion ciega Bloom (poblacion completa elegible)",
+            f"Generado: {ts}  Semilla: {seed} (permuta el orden; ambos codificadores ven los mismos items)",
+            f"N poblacion elegible: {len(included)}  N en este archivo: {len(main_sample)}",
             f"Exclusiones: {excl_summary}",
-            f"INSTRUCCION: la columna bloom_level del sistema NO aparece en este archivo.",
-            f"Llenar confianza (1=segura, 2=dudosa) y nota si aplica.",
+            f"INSTRUCCION: llenar proceso_cognitivo (R/C/AP/AN/E/CR/I), tipo_conocimiento,",
+            f"  multiparte (0/1), dependiente_contexto (0/1), expresion_dificultad (0/1),",
+            f"  confianza (1=segura 2=dudosa) y nota si aplica.",
+            f"  La columna bloom_level del clasificador NO aparece en este archivo.",
+            f"  id_usuario tampoco aparece; la tabla de enlace item->usuario queda con el coordinador.",
+            f"  classifier_version='legacy' significa que el item precede a la instrumentacion P1.2.",
         ],
     )
 
@@ -1290,9 +1327,21 @@ async def export_bloom_coding(
             cv_ = r.get("classifier_version", "legacy")
             ver_dist[cv_] = ver_dist.get(cv_, 0) + 1
 
+        # Concentracion de usuarios en la muestra principal (para reportar en el articulo)
+        # Nota: id_usuario no va en el CSV ciego, pero si en las estadisticas internas.
+        user_item_counts: dict = {}
+        for r in main_sample:
+            # _bloom_auto es el unico campo interno disponible aqui; usamos id_item
+            # para reconstruir la concentracion (el coordinador tiene la tabla de enlace)
+            pass  # concentracion calculada en analyze_participation.py con acceso a BD
+
         stats = {
             "fecha_corte": ts,
             "semilla": seed,
+            "nota_semilla": (
+                "La semilla permuta el ORDEN de los items, no los items mismos. "
+                "Ambos codificadores reciben la poblacion completa elegible en distinto orden."
+            ),
             # Versiones del sistema al momento del export
             "sistema": {
                 "classifier_version": CLASSIFIER_VERSION,
@@ -1301,14 +1350,28 @@ async def export_bloom_coding(
             },
             "total_mensajes_usuario": len(all_user_msgs),
             "exclusiones": exclusion_counts,
+            "nota_exclusiones": (
+                "E4_same: duplicado exacto del mismo usuario. "
+                "E4_cross: texto normalizado identico entre usuarios distintos "
+                "(posible enunciado de tarea transcrito al chat — hallazgo a reportar)."
+            ),
             "incluidos_tras_exclusion": len(included),
             "muestra_principal_n": len(main_sample),
             "muestra_complementaria_n": len(comp_sample),
             "distribucion_classifier_version_muestra_principal": ver_dist,
+            "nota_legacy": (
+                "classifier_version='legacy' indica items clasificados antes de P1.2 "
+                "(sin metadatos de trazabilidad). Este estudio valida el clasificador pre-auditoria."
+            ),
             "estratos_complementaria": {
                 lv: sum(1 for r in comp_sample if r["_bloom_auto"] == lv)
                 for lv in sorted(high_levels)
             },
+            "nota_complementaria": (
+                "Muestra complementaria puede ser insuficiente para estimar concordancia "
+                "en niveles altos. Reportar como evidencia cualitativa de patron de error, "
+                "no como estimacion de acuerdo."
+            ),
         }
         zf.writestr(f"estadisticas_muestreo_{ts}.json", _json.dumps(stats, indent=2, ensure_ascii=False))
     zip_buf.seek(0)
