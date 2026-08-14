@@ -1130,30 +1130,58 @@ async def export_bloom_coding(
         r"entendido|perfecto|muy bien|listo|saludos|bye|adios|chao)[.,!?\s]*$",
         re.IGNORECASE,
     )
-    # E5: patron de contenido quimico.
-    # Ampliado tras auditoria manual de 30 excluidos (2026-08-14): la lista original
-    # no cubria terminos frecuentes del curso como hamiltoniano, espín, determinante
-    # de Slater, de Broglie, Stern-Gerlach, Compton, cuerpo negro, acoplamiento,
-    # enlace de hidrógeno, ácido/base, conjugado, series del hidrógeno, etc.
-    # Criterio de inclusion: cualquier termino cuya presencia hace imposible que el
-    # mensaje sea conversacion trivial no quimica.
+    # E5: patron de contenido quimico del curso Estructura de la Materia.
+    # IMPORTANTE: este patron se aplica sobre texto normalizado (sin acentos,
+    # minusculas, sin puntuacion) via _normalize(). Por eso los terminos no
+    # llevan variantes de acento — "cuant" captura "cuántico" una vez normalizado.
+    #
+    # Historial de versiones:
+    #   v1 (original): lista corta — auditoria 1 mostro 22/30 falsos positivos.
+    #   v2 (2026-08-14): hamiltoniano, espin, slater, broglie, etc.
+    #   v3 (2026-08-14, auditoria 1): nuevos terminos; pero pattern se aplicaba
+    #       sobre texto con acentos -> fallas en 'cuanticos', 'anfiprótica', etc.
+    #   v4 (2026-08-14, auditoria 2): patron aplicado sobre norm; simplificado;
+    #       recuperados: ultravioleta, rayos catodicos/X, series espectrales,
+    #       lantanida/lantonida, zeff, defecto de masa, poliprot, foto electrico,
+    #       lineas de absorcion/emision, elementos ligeros/pesados.
+    #       Excluidos deliberadamente: tokamak, Big Bang, gravedad, 4 fuerzas,
+    #       materia oscura, antimateria — fuera del contenido especifico del curso.
+    # Criterio: presencia del termino hace imposible que el mensaje sea
+    # conversacion trivial fuera del curso de quimica cuantica/estructura atomica.
     chem_pattern = re.compile(
-        r"(atom|electr[oó]n|prot[oó]n|neutr[oó]n|orbital|enlace|mol[eé]|energ[ií]|"
-        r"quantum|cuant|espectro|fot[oó]n|ion|carga|tabla peri[oó]dica|periodo|grupo|"
-        r"configuraci[oó]n|niveles|subnivel|heisenberg|bohr|schr[oö]dinger|"
-        r"ionizaci[oó]n|electronegat|radio at[oó]m|entalp|entr[oó]p|gibbs|covalente|"
-        r"molecular|vsepr|hibridac|aufbau|pauli|hund|rydberg|balmer|"
-        r"hamiltoniano|hamiltonian|esp[ií]n|spin|slater|broglie|compton|"
-        r"stern|gerlach|fotoelectric|cuerpo negro|radiaci[oó]n|"
+        r"(atom|electron|proton|neutron|orbital|enlace|mole|energ|"
+        r"quantum|cuant|espectro|foton|ion|carga|tabla periodica|periodo|grupo|"
+        r"configuracion|niveles|subnivel|heisenberg|bohr|schrodinger|"
+        r"ionizacion|electronegat|radio atom|radio ion|entalp|entrop|"
+        r"gibbs|covalente|molecular|vsepr|hibridac|aufbau|pauli|hund|rydberg|balmer|"
+        r"hamiltoniano|hamiltonian|hamitoniano|espin|spin|slater|broglie|compton|"
+        r"stern|gerlach|fotoelectric|cuerpo negro|radiacion|"
         r"acoplamiento|momento angular|momento dipolar|"
-        r"[aá]cido|base de|bronsted|arrhenius|lewis|conj[uo]gado|"
-        r"puente de hidr[oó]geno|puentes de hidr[oó]geno|"
-        r"serie[s]? de hidr[oó]geno|radionucl|radiois[oó]topo|"
-        r"determinante|operador|funci[oó]n de onda|dualidad|"
-        r"materia oscura|bariónico|bari[oó]n|cuatro fuerzas|fuerza fundamental|"
-        r"efecto compton|efecto fotoel[eé]ctrico|davisson|germer|"
-        r"experimento de|modelo de|principio de|ecuaci[oó]n de|"
-        r"n[uú]mero cu[aá]ntico|subnivel|longitud de onda|frecuencia)",
+        r"acido|anfiprot|poliprot|base de|bronsted|arrhenius|lewis|conjugado|"
+        r"puentes? de hidrogeno|"
+        r"series? de hidrogeno|series? de atom|series espectrales|series? espectral|"
+        r"radionucl|radioisotopo|radioactiv|desintegracion|nucleon|"
+        r"determinante|operador|funcion de onda|funcion de distribucion|"
+        r"distribucion radial|dualidad|"
+        r"efecto compton|efecto fotoelectrico|efecto zeeman|zeeman|"
+        r"davisson|germer|thompson|"
+        r"experimento de|modelo de|principio de|ecuacion de|"
+        r"numero cuantico|numeros cuanticos|longitud de onda|frecuencia|"
+        r"multiplete|multiplicidad|"
+        r"autoconsistente|autoconsitente|hartree|fock|"
+        r"operacion de intercambio|intercambio de electron|"
+        r"planck|plank|ehν|hν|"
+        r"particulas? fundamental|particulas? subat|"
+        r"metales? y no metal|no metales?|"
+        r"ultravioleta|rayos catodicos|rayos x|"
+        r"lantanida|lantonida|zeff|defecto de masa|"
+        r"lineas de absorcion|lineas de emision|"
+        r"foto electrico|elementos ligeros|elementos pesados|"
+        r"actinido|actinidos|lantanido|"
+        r"van der waals|fuerzas de van|"
+        r"rusel+.saunders|rusel+ saunders|terminos de|acoplamiento ls|acoplamiento jj|"
+        r"momento magnetico|mu_l|mu_s|mu_j|"
+        r"radio ironico|radio ionico)",  # captura typos comunes de 'iónico'
         re.IGNORECASE,
     )
 
@@ -1191,7 +1219,9 @@ async def export_bloom_coding(
         # E3: interaccion con el sistema de examen, o respuesta a pregunta de examen
         # (el sistema de examen puede insertar el prefijo "ESTA FUE TU PREGUNTA:" en mensajes
         # de seguimiento; esos no son consultas espontaneas)
-        if exam_patterns.search(text) or text.startswith("ESTA FUE TU PREGUNTA"):
+        if (exam_patterns.search(text)
+                or text.startswith("ESTA FUE TU PREGUNTA")
+                or re.match(r"^ES LA PREGUNTA QUE", text, re.IGNORECASE)):
             exclusion_counts["E3"] += 1
             continue
         # E4-same: duplicado exacto del mismo usuario
@@ -1207,8 +1237,10 @@ async def export_bloom_coding(
             exclusion_counts["E4_cross"] += 1
             continue
         seen_normalized.add(norm)
-        # E5: sin contenido quimico identificable
-        if not chem_pattern.search(text):
+        # E5: sin contenido quimico identificable.
+        # Se busca sobre el texto normalizado (sin acentos) para evitar que
+        # caracteres acentuados interrumpan subcadenas como "cuant" en "cuánticos".
+        if not chem_pattern.search(norm):
             exclusion_counts["E5"] += 1
             continue
 
@@ -1419,7 +1451,7 @@ async def export_bloom_coding(
         _t = re.sub(r"\s+", " ", _t).strip()
         if _t in _seen_norm_for_audit: continue
         _seen_norm_for_audit.add(_t)
-        if not chem_pattern.search(text):
+        if not chem_pattern.search(_t):   # _t es el texto normalizado, igual que en E5
             e5_excluded_items.append({"id_item": f"M{m.id}", "texto": text})
     _e5_audit_rng.shuffle(e5_excluded_items)
     e5_audit_sample = e5_excluded_items[:30]
