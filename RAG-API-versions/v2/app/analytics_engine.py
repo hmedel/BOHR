@@ -123,7 +123,6 @@ class AnalyticsEngine:
             r"\bderivir\b",
             r"\bdeducir\b",
             r"\bdemostrar\b",
-            r"\bdemostrar\b",
             r"\bpredecir\b",
         ]
         intermediate_patterns = [
