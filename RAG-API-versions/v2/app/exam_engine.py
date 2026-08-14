@@ -4,6 +4,7 @@ Genera UNA pregunta a la vez, recibe respuesta, da feedback, siguiente pregunta
 """
 
 import json
+import random
 import re
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
@@ -13,13 +14,18 @@ class ExamEngine:
     
     @staticmethod
     def should_offer_exam(conversation_messages: List) -> Dict:
-        """Determinar si se debe ofrecer un examen"""
+        """Determinar si se debe ofrecer un examen.
+
+        Umbral: 5 mensajes de usuario y al menos 2 temas distintos.
+        (Version anterior usaba 3; main.py usaba 5; se unifica aqui en 5,
+        que es el valor documentado en BOHR_idea.md y en CLAUDE.md.)
+        """
         user_messages = [m for m in conversation_messages if m.role == "user"]
-        
-        if len(user_messages) < 3:
+
+        if len(user_messages) < 5:
             return {
                 "should_offer": False,
-                "reason": "Necesitas al menos 3 consultas para generar un examen significativo"
+                "reason": "Necesitas al menos 5 consultas para generar un examen significativo",
             }
         
         topics_covered = set()
@@ -190,11 +196,65 @@ GENERA SOLO EL JSON, SIN TEXTO ADICIONAL:"""
                 response = json_match.group(0)
             
             question_data = json.loads(response)
+
+            # Corregir sesgo posicional: el template fija _respuesta_correcta
+            # en "D". Se barajan las opciones en el servidor y se reasignan
+            # las letras A-D para que la posicion de la respuesta correcta
+            # sea aleatoria en cada pregunta.
+            question_data = ExamEngine._shuffle_options(question_data)
+
             return question_data
-            
+
         except Exception as e:
             print(f"Error parsing question: {e}")
             return None
+
+    @staticmethod
+    def _shuffle_options(question_data: Dict) -> Dict:
+        """
+        Baraja las opciones de opcion multiple reasignando letras A-D.
+        Actualiza _respuesta_correcta con la nueva letra de la opcion correcta.
+        No modifica preguntas de desarrollo o sin opciones.
+        """
+        opciones = question_data.get("opciones", [])
+        respuesta_correcta = question_data.get("_respuesta_correcta", "").upper().strip()
+
+        if not opciones or not respuesta_correcta:
+            return question_data
+
+        # Mapear letra -> texto de opcion original (quitar prefijo "A) " etc.)
+        letras = ["A", "B", "C", "D"]
+        contenidos = {}
+        for op in opciones:
+            for letra in letras:
+                if op.upper().startswith(f"{letra})") or op.upper().startswith(f"{letra}."):
+                    contenidos[letra] = op[2:].strip()
+                    break
+
+        if len(contenidos) < 2:
+            return question_data
+
+        # Identificar el texto de la opcion correcta antes de barajar
+        texto_correcto = contenidos.get(respuesta_correcta)
+        if texto_correcto is None:
+            return question_data
+
+        # Barajar los textos
+        textos = list(contenidos.values())
+        random.shuffle(textos)
+
+        # Reasignar letras y encontrar la nueva letra de la correcta
+        nuevas_opciones = []
+        nueva_letra_correcta = respuesta_correcta  # fallback
+        for i, texto in enumerate(textos):
+            letra = letras[i]
+            nuevas_opciones.append(f"{letra}) {texto}")
+            if texto == texto_correcto:
+                nueva_letra_correcta = letra
+
+        question_data["opciones"] = nuevas_opciones
+        question_data["_respuesta_correcta"] = nueva_letra_correcta
+        return question_data
     
     @staticmethod
     def evaluate_answer(
@@ -216,12 +276,17 @@ GENERA SOLO EL JSON, SIN TEXTO ADICIONAL:"""
         # Criterios de evaluación
         criterios = question.get("criterios_evaluacion", {})
         
-        # Generar feedback según resultado
+        # Generar feedback segun resultado.
+        # La longitud de la respuesta NO indica calidad: en opcion multiple el
+        # estudiante escribe una letra, por lo que len() < 20 siempre y el
+        # criterio anterior devolia sistematicamente "bueno" en lugar de
+        # "excelente". Se usa directamente el criterio "excelente" cuando es
+        # correcta, "insuficiente" cuando no lo es.
         if is_correct:
-            nivel = "excelente" if len(student_answer) > 20 else "bueno"
+            nivel = "excelente"
             feedback_base = criterios.get(nivel, "Respuesta correcta")
             
-            feedback = f"""### ✅ Respuesta Correcta
+            feedback = f"""### Respuesta Correcta
 
 {feedback_base}
 
@@ -241,7 +306,7 @@ Has demostrado comprensión del concepto. Tu respuesta indica que identificaste 
             nivel = "insuficiente"
             feedback_base = criterios.get(nivel, "Revisa los conceptos fundamentales")
             
-            feedback = f"""### 🔍 Oportunidad de Aprendizaje
+            feedback = f"""### Oportunidad de Aprendizaje
 
 {feedback_base}
 
@@ -253,19 +318,21 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
             for recurso in question.get("recursos_estudio", []):
                 feedback += f"- {recurso}\n"
             
-            feedback += f"""
-**Conceptos clave a repasar:**
-"""
-            for concepto in question.get("_conceptos_clave", [])[:2]:
-                # Generalizar sin revelar respuesta
-                concepto_sin_revelar = concepto.split("Debe ")[1] if "Debe " in concepto else concepto
-                feedback += f"- {concepto_sin_revelar}\n"
+            # _conceptos_clave no se incluye en el feedback: su contenido
+            # (p.ej. "Debe identificar X") puede revelar la respuesta correcta
+            # cuando el estudiante falla. Se usa en cambio recursos_estudio,
+            # que no contiene la respuesta.
         
         return {
             "is_correct": is_correct,
+            # outcome_label: "excelente"/"insuficiente" son etiquetas de
+            # correccion, NO niveles SOLO. El campo "nivel" se conserva por
+            # compatibilidad con main.py pero NO debe escribirse en
+            # exam_responses.solo_level (ver main.py P0.2).
+            "outcome_label": "excelente" if is_correct else "insuficiente",
             "nivel": "excelente" if is_correct else "insuficiente",
             "feedback": feedback,
-            "recursos_recomendados": question.get("recursos_estudio", [])
+            "recursos_recomendados": question.get("recursos_estudio", []),
         }
     
     @staticmethod
@@ -286,19 +353,19 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
         
         # Generar recomendaciones
         if correct_count == total_questions:
-            nivel_global = "🌟 Excelente comprensión"
+            nivel_global = "Excelente comprension"
             descripcion = "Demuestras dominio sólido de los conceptos estudiados. Has alcanzado los objetivos de aprendizaje."
         elif correct_count >= total_questions * 0.7:
-            nivel_global = "✅ Buena comprensión"
+            nivel_global = "Buena comprension"
             descripcion = "Tienes una base sólida. Con un poco más de práctica alcanzarás el dominio completo."
         elif correct_count >= total_questions * 0.5:
-            nivel_global = "📚 Comprensión en desarrollo"
+            nivel_global = "Comprension en desarrollo"
             descripcion = "Estás construyendo tu conocimiento. Dedica tiempo a repasar los conceptos fundamentales."
         else:
-            nivel_global = "🌱 Iniciando el aprendizaje"
+            nivel_global = "Iniciando el aprendizaje"
             descripcion = "Estás en las etapas iniciales. No te desanimes, todos comenzamos aquí. Enfócate en los conceptos básicos."
         
-        summary = f"""# 🎓 Resumen de tu Examen Formativo
+        summary = f"""# Resumen del Examen Formativo
 
 ## {nivel_global}
 
@@ -306,7 +373,7 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
 
 ---
 
-## 📊 Resultados
+## Resultados
 
 **Preguntas respondidas:** {total_questions}
 **Respuestas correctas:** {correct_count}
@@ -320,7 +387,7 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
         summary += f"""
 ---
 
-## 💡 Revisión Detallada
+## Revision Detallada
 
 """
         for i, qa in enumerate(questions_and_answers, 1):
@@ -332,19 +399,20 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
             correct_letter = q.get("_respuesta_correcta", "")
             opciones = q.get("opciones", [])
 
-            summary += f"### {icon} Pregunta {i} — {q.get('nivel_bloom','').title()}\n\n"
+            summary += f"### {'Correcta' if is_correct else 'Incorrecta'}: Pregunta {i} — {q.get('nivel_bloom','').title()}\n\n"
             summary += f"{enunciado}\n\n"
             if opciones:
                 for op in opciones:
                     summary += f"{op}\n"
                 summary += "\n"
             summary += f"**Tu respuesta:** {qa.get('answer','')}\n\n"
-            if not is_correct and correct_letter:
-                summary += f"**Respuesta correcta:** {correct_letter}\n\n"
-            summary += f"**Retroalimentación:** {ev.get('feedback','').splitlines()[1] if ev.get('feedback') else ''}\n\n---\n\n"
+            # La respuesta correcta NO se revela en el resumen para preservar
+            # el valor de uso de las preguntas en exámenes futuros.
+            # Si en el futuro se decide mostrarla, agregar aqui.
+            summary += f"**Retroalimentacion:** {ev.get('feedback','').splitlines()[1] if ev.get('feedback') else ''}\n\n---\n\n"
 
         summary += f"""
-## 🗂️ Temas cubiertos
+## Temas cubiertos
 
 """
         for topic in topics_covered[:5]:
@@ -354,7 +422,7 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
         summary += """
 ---
 
-## ✨ Fortalezas Observadas
+## Fortalezas Observadas
 
 """
         if correct_count > 0:
@@ -369,7 +437,7 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
         summary += """
 ---
 
-## 📈 Plan de Acción Personalizado
+## Plan de Accion
 
 """
         
@@ -411,7 +479,7 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
         summary += """
 ---
 
-## 🔄 Próximos Pasos
+## Proximos Pasos
 
 1. **Revisa los recursos sugeridos** en cada pregunta
 2. **Practica** con ejercicios adicionales
@@ -420,7 +488,7 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
 
 ---
 
-💡 **Recuerda:** Este examen es formativo, no sumativo. Su objetivo es ayudarte a identificar qué sabes y qué necesitas reforzar. El aprendizaje es un proceso continuo.
+**Nota:** Este examen es formativo, no sumativo. Su objetivo es ayudarte a identificar qué sabes y qué necesitas reforzar. El aprendizaje es un proceso continuo.
 
 ¿Deseas comenzar una nueva conversación o profundizar en algún tema específico?
 """

@@ -248,7 +248,7 @@ async def query(
                 total_q = exam_data.get("total_questions", 3)
                 
                 return {
-                    "answer": f"""⚠️ **Ya tienes un examen en progreso**
+                    "answer": f"""**Ya tienes un examen en progreso**
 
 Estás en la pregunta {current_q} de {total_q}.
 
@@ -277,7 +277,7 @@ Estás en la pregunta {current_q} de {total_q}.
             
             if not exam_check["should_offer"]:
                 return {
-                    "answer": f"""📚 **Aún no estás listo para un nuevo examen**
+                    "answer": f"""**Aun no estas listo para un nuevo examen**
 
 {exam_check['reason']}
 
@@ -286,11 +286,11 @@ Continúa estudiando y luego podrás tomar un examen formativo.""",
                 }
             else:
                 return {
-                    "answer": f"""🎓 **¡Estás listo para un examen formativo!**
+                    "answer": f"""**Estas listo para un examen formativo**
 
 **Resumen:**
-- ✅ Consultas realizadas: {exam_check['queries_count']}
-- ✅ Temas cubiertos: {', '.join(exam_check['topics_covered'][:3])}
+- Consultas realizadas: {exam_check['queries_count']}
+- Temas cubiertos: {', '.join(exam_check['topics_covered'][:3])}
 
 **Formato del examen:**
 - 3-5 preguntas (principalmente opción múltiple)
@@ -314,7 +314,7 @@ Continúa estudiando y luego podrás tomar un examen formativo.""",
                 db.commit()
                 
                 return {
-                    "answer": """✅ **Examen cancelado**
+                    "answer": """**Examen cancelado**
 
 Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un examen"**""",
                     "sources": []
@@ -415,7 +415,7 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
             db.commit()
             
             # Formatear pregunta
-            question_display = f"""# 📝 Pregunta 1 de {total_questions}
+            question_display = f"""# Pregunta 1 de {total_questions}
 
 **Nivel:** {question['nivel_bloom'].title()}
 
@@ -466,17 +466,25 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                 # Análisis de sentimiento de la respuesta del estudiante
                 sentiment = analytics_engine.analyze_sentiment(query_text)
                 
-                # Guardar respuesta con análisis de sentimiento
+                # Guardar respuesta.
+                # solo_level se deja en NULL: evaluation["nivel"] contiene
+                # "excelente"/"insuficiente" (etiqueta de correccion), no un
+                # nivel SOLO (preestructural…abstracto_extendido). Escribir esa
+                # etiqueta en solo_level contamina el historico con valores
+                # que no son SOLO (ver P0.2 del documento de auditoria).
+                # sentiment_score/label se conservan en la columna pero no se
+                # usan en decisiones pedagogicas: TextBlob es monolingue ingles
+                # y produce ceros en texto en espanol (ver P0.4).
                 exam_response = ExamResponse(
                     exam_id=active_exam.id,
                     user_id=current_user.id,
                     question_number=current_q,
                     student_answer=query_text,
                     bloom_level=current_question.get("nivel_bloom", ""),
-                    solo_level=evaluation.get("nivel", ""),
+                    solo_level=None,
                     evaluation_data=json.dumps(evaluation),
                     sentiment_score=sentiment["score"],
-                    sentiment_label=sentiment["label"]
+                    sentiment_label=sentiment["label"],
                 )
                 db.add(exam_response)
                 db.commit()
@@ -530,7 +538,7 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
 
 ---
 
-# 📝 Pregunta {next_q} de {total_q}
+# Pregunta {next_q} de {total_q}
 
 **Nivel:** {next_question['nivel_bloom'].title()}
 
@@ -577,9 +585,12 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                         if bl: bloom_dist[bl] = bloom_dist.get(bl, 0) + 1
                         if sl: solo_dist[sl] = solo_dist.get(sl, 0) + 1
 
-                    predominant_solo = max(solo_dist, key=solo_dist.get) if solo_dist else (
-                        "relacional" if correct_count >= total_q * 0.7 else "multiestructural"
-                    )
+                    # solo_dist ahora siempre estara vacio porque solo_level
+                    # se guarda como NULL (ver P0.2). El fallback que inferida
+                    # nivel SOLO desde porcentaje de aciertos se elimina: es
+                    # una invencion, no una medicion. predominant_solo_level
+                    # queda en NULL hasta que haya evaluacion SOLO real.
+                    predominant_solo = None
                     strengths = [f"Respondió correctamente {correct_count} de {total_q} preguntas"]
                     if bloom_dist:
                         top_bloom = max(bloom_dist, key=bloom_dist.get)
@@ -588,12 +599,16 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                     exam_result = ExamResult(
                         exam_id=active_exam.id,
                         user_id=current_user.id,
+                        # predominant_solo_level es NULL: no hay evaluacion SOLO real todavia.
                         predominant_solo_level=predominant_solo,
-                        overall_description=f"Completó {total_q} preguntas con {correct_count} correctas",
+                        overall_description=f"Completo {total_q} preguntas con {correct_count} correctas",
                         strengths=json.dumps(strengths),
-                        improvement_plan=json.dumps({"plan": "Revisar los temas con menor desempeño"}),
+                        improvement_plan=json.dumps({"plan": "Revisar los temas con menor desempeno"}),
                         bloom_distribution=json.dumps(bloom_dist),
-                        solo_distribution=json.dumps(solo_dist),
+                        # solo_distribution: los valores en solo_dist son etiquetas de correccion,
+                        # no niveles SOLO. Se guarda el dict real para auditoria pero se documenta
+                        # que no debe interpretarse como distribucion SOLO.
+                        solo_distribution=json.dumps({"_nota": "valores son outcome_label, no niveles SOLO", **solo_dist}),
                     )
                     db.add(exam_result)
                     # Marcar examen como completado
@@ -678,7 +693,7 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
         offer = should_offer_exam(conv.messages)
         if offer:
             answer_display += "\n\n---\n\n"
-            answer_display += "💡 **Has explorado varios temas en esta sesión. ¿Te gustaría hacer un examen formativo sobre lo que vimos?**\n\n"
+            answer_display += "**Has explorado varios temas en esta sesion. ¿Te gustaria hacer un examen formativo?**\n\n"
             answer_display += "Escribe **\"Quiero un examen\"** cuando estés listo.\n\n"
         
         # Guardar respuesta
@@ -1066,7 +1081,7 @@ async def query_stream(
             db.refresh(conv)
             offer = should_offer_exam(conv.messages)
             if offer:
-                extra = "\n\n---\n\n💡 **Has explorado varios temas en esta sesión. ¿Te gustaría hacer un examen formativo sobre lo que vimos?** Escribe **\"Quiero un examen\"** cuando estés listo."
+                extra = "\n\n---\n\n**Has explorado varios temas en esta sesion. ¿Te gustaria hacer un examen formativo?** Escribe **\"Quiero un examen\"** cuando estés listo."
                 full_text += extra
                 yield f"data: {json.dumps({'type':'token','content':extra})}\n\n"
 
