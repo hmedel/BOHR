@@ -940,6 +940,235 @@ async def cancel_active_exam(current_user: User = Depends(get_current_user), db:
     return {"status": "cancelled", "exam_id": active.id}
 
 
+# ========== EXPORTACION PARA CODIFICACION CIEGA (estudio de validez) ==========
+
+@app.get("/admin/export/bloom-coding")
+async def export_bloom_coding(
+    request: Request,
+    token: Optional[str] = None,
+    seed: int = 42,
+    sample_main: int = 150,
+    sample_complement: int = 20,
+    db: Session = Depends(get_db),
+):
+    """
+    Exporta dos CSVs (principal y complementaria) para codificacion ciega
+    de nivel Bloom por dos docentes independientes.
+
+    Cumple los requisitos del Manual de Codificacion Bloom (Parte A y B):
+    - Sin columna bloom_level (el clasificador automatico)
+    - Identificador seudonimizado estable (HMAC-SHA256 del user_id)
+    - Exclusiones E1-E5 aplicadas automaticamente y reportadas en cabecera
+    - Columnas de trabajo: multiparte, dependiente_contexto, expresion_dificultad,
+      confianza, nota (vacias para que el codificador las llene)
+    - Orden aleatorizado con semilla configurable (distinta por codificador:
+      ?seed=42 para uno, ?seed=99 para el otro)
+    - Muestra complementaria estratificada por analizar/evaluar/crear
+      (max sample_complement por estrato, separada de la principal)
+
+    Solo accesible para administradores.
+    El CSV NO incluye: user_id real, username, email, conversation_id, message_id.
+    """
+    import csv
+    import hashlib
+    import hmac
+    import io
+    import random as _random
+    import zipfile
+
+    authorization = request.headers.get("Authorization")
+    admin = _resolve_admin(token, db, authorization)
+
+    # Semilla para reproducibilidad (distinta por codificador)
+    rng = _random.Random(seed)
+
+    # Clave para pseudonimizacion estable (no reversible sin la clave)
+    # Se usa HMAC para que el mismo user_id siempre produzca el mismo seudónimo
+    _HMAC_KEY = b"bohr-validity-study-2026"
+
+    def pseudonymize(user_id: int) -> str:
+        h = hmac.HMAC(_HMAC_KEY, str(user_id).encode(), hashlib.sha256)
+        return h.hexdigest()[:12]
+
+    # Recuperar todos los mensajes de usuario con sus metadatos
+    all_user_msgs = (
+        db.query(Message)
+        .join(Conversation)
+        .filter(Message.role == "user")
+        .order_by(Message.id)
+        .all()
+    )
+
+    # Patrones de exclusion (aplicados antes de mirar los datos)
+    exam_patterns = re.compile(
+        r"\b(examen|evalúame|evaluame|prueba|cancelar|comenzar|sí comenzar|si comenzar"
+        r"|quiero un examen|quiero otro examen|nuevo examen)\b",
+        re.IGNORECASE,
+    )
+    greeting_patterns = re.compile(
+        r"^(hola|buenos días|buenas tardes|buenas noches|gracias|de nada|ok|"
+        r"entendido|perfecto|muy bien|listo|saludos|bye|adios|chao)[.,!?\s]*$",
+        re.IGNORECASE,
+    )
+    chem_pattern = re.compile(
+        r"(atom|electron|protón|proton|neutron|orbital|enlace|mol|energía|energia|"
+        r"quantum|cuantic|espectro|foton|fotón|ion|carga|tabla periódica|periodo|grupo|"
+        r"configuracion|configuración|niveles|subnivel|heisenberg|bohr|schrodinger|"
+        r"ionizacion|ionización|electronegat|radio atomic|entalp|entrop|gibbs|covalente|"
+        r"molecular|vsepr|orbital|hibridac|aufbau|pauli|hund|rydberg|balmer)",
+        re.IGNORECASE,
+    )
+
+    exclusion_counts = {"E1": 0, "E2": 0, "E3": 0, "E4": 0, "E5": 0}
+    seen_texts: dict[int, set] = {}  # user_pseudo -> set de textos vistos
+    included = []
+
+    for m in all_user_msgs:
+        text = (m.content or "").strip()
+        conv = m.conversation
+
+        # E1: menos de 15 caracteres
+        if len(text.replace(" ", "")) < 15:
+            exclusion_counts["E1"] += 1
+            continue
+        # E2: saludo o despedida
+        if greeting_patterns.match(text):
+            exclusion_counts["E2"] += 1
+            continue
+        # E3: interaccion con el sistema de examen
+        if exam_patterns.search(text):
+            exclusion_counts["E3"] += 1
+            continue
+        # E4: duplicado exacto del mismo usuario (distancia 0)
+        uid = conv.user_id if conv else 0
+        if uid not in seen_texts:
+            seen_texts[uid] = set()
+        if text in seen_texts[uid]:
+            exclusion_counts["E4"] += 1
+            continue
+        seen_texts[uid].add(text)
+        # E5: sin contenido quimico identificable
+        if not chem_pattern.search(text):
+            exclusion_counts["E5"] += 1
+            continue
+
+        # Detectar marcadores de metadatos (columnas de trabajo)
+        is_multiparte = 1 if text.count("?") > 1 else 0
+        is_dep_ctx = 1 if re.match(r"^(y |¿y |pero |entonces |y eso |en ese caso)", text, re.IGNORECASE) else 0
+        has_dificultad = 1 if re.search(
+            r"\b(no entiendo|no comprendo|estoy perdido|me confunde|no sé|no se|"
+            r"tengo duda|tengo una duda|no logro)\b", text, re.IGNORECASE
+        ) else 0
+
+        included.append({
+            "id_item": f"M{m.id}",
+            "id_usuario": pseudonymize(uid),
+            "texto_consulta": text,
+            # bloom_level OMITIDO intencionalmente (codificacion ciega)
+            "_bloom_auto": m.bloom_level or "no_clasificado",  # solo para separar muestras
+            "multiparte": is_multiparte,
+            "dependiente_contexto": is_dep_ctx,
+            "expresion_dificultad": has_dificultad,
+            "confianza": "",
+            "nota": "",
+        })
+
+    # Separar muestra complementaria (estratos poco frecuentes) ANTES de aleatorizar
+    high_levels = {"analizar", "evaluar", "crear"}
+    complement_pool = [r for r in included if r["_bloom_auto"] in high_levels]
+    main_pool = [r for r in included if r["_bloom_auto"] not in high_levels]
+
+    # Muestra principal: aleatorizar y tomar min(sample_main, disponibles)
+    rng.shuffle(main_pool)
+    main_sample = main_pool[:sample_main]
+
+    # Muestra complementaria: hasta sample_complement por estrato
+    comp_sample = []
+    for level in high_levels:
+        stratum = [r for r in complement_pool if r["_bloom_auto"] == level]
+        rng.shuffle(stratum)
+        comp_sample.extend(stratum[:sample_complement])
+    rng.shuffle(comp_sample)
+
+    # Quitar columna interna _bloom_auto de los CSVs de salida
+    FIELDNAMES = [
+        "id_item", "id_usuario", "texto_consulta",
+        "multiparte", "dependiente_contexto", "expresion_dificultad",
+        "confianza", "nota",
+    ]
+
+    def write_csv(rows: list, title: str, extra_header_lines: list) -> str:
+        buf = io.StringIO()
+        # Cabecera informativa (comentarios con #)
+        for line in extra_header_lines:
+            buf.write(f"# {line}\n")
+        writer = csv.DictWriter(buf, fieldnames=FIELDNAMES, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+        return buf.getvalue()
+
+    excl_summary = " | ".join(f"{k}:{v}" for k, v in exclusion_counts.items())
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    main_csv = write_csv(
+        main_sample,
+        "principal",
+        [
+            f"MUESTRA PRINCIPAL — codificacion ciega Bloom",
+            f"Generado: {ts}  Semilla: {seed}",
+            f"N incluidos tras exclusiones: {len(included)}  N muestra: {len(main_sample)}",
+            f"Exclusiones: {excl_summary}",
+            f"INSTRUCCION: la columna bloom_level del sistema NO aparece en este archivo.",
+            f"Llenar confianza (1=segura, 2=dudosa) y nota si aplica.",
+        ],
+    )
+
+    comp_csv = write_csv(
+        comp_sample,
+        "complementaria",
+        [
+            f"MUESTRA COMPLEMENTARIA — estratificada por analizar/evaluar/crear",
+            f"Generado: {ts}  Semilla: {seed}",
+            f"N por estrato (max {sample_complement}): " +
+            " | ".join(
+                f"{lv}:{sum(1 for r in comp_sample if r['_bloom_auto']==lv)}"
+                for lv in sorted(high_levels)
+            ),
+            f"ADVERTENCIA: esta muestra NO debe agregarse a la principal para calcular acuerdo global.",
+            f"Reportar aparte. Es util para estimar concordancia en niveles poco frecuentes.",
+        ],
+    )
+
+    # Empaquetar en ZIP
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"bloom_principal_seed{seed}_{ts}.csv", main_csv)
+        zf.writestr(f"bloom_complementaria_seed{seed}_{ts}.csv", comp_csv)
+        # Estadisticas de exclusion en JSON para el artículo
+        import json as _json
+        stats = {
+            "fecha_corte": ts,
+            "semilla": seed,
+            "total_mensajes_usuario": len(all_user_msgs),
+            "exclusiones": exclusion_counts,
+            "incluidos_tras_exclusion": len(included),
+            "muestra_principal_n": len(main_sample),
+            "muestra_complementaria_n": len(comp_sample),
+            "estratos_complementaria": {
+                lv: sum(1 for r in comp_sample if r["_bloom_auto"] == lv)
+                for lv in sorted(high_levels)
+            },
+        }
+        zf.writestr(f"estadisticas_muestreo_{ts}.json", _json.dumps(stats, indent=2, ensure_ascii=False))
+    zip_buf.seek(0)
+
+    return StreamingResponse(
+        iter([zip_buf.getvalue()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=bloom_coding_{ts}.zip"},
+    )
+
+
 # ========== ANALYTICS DASHBOARD ==========
 # ========== STREAMING ENDPOINT ==========
 @app.post("/query/stream")
