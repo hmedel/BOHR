@@ -498,7 +498,7 @@ Este último punto es el que tiene mayor valor para la comunidad: no interesa ta
 
 El criterio es **léxico, no semántico**: la presencia de al menos uno de los términos del patrón hace imposible que el mensaje sea conversación trivial ajena al curso. No exige que el mensaje sea una *buena* pregunta de química, solo que sea sobre química del curso.
 
-**Alcance del curso cubierto por E5 (versión en vigor, v4):**
+**Alcance del curso cubierto por E5 (versión en vigor, v5):**
 - Estructura atómica: átomo, electrón, protón, neutrón, orbital, configuración electrónica, números cuánticos, aufbau, Pauli, Hund, Slater, Zeff.
 - Mecánica cuántica: función de onda, principio de Heisenberg, ecuación de Schrödinger, Hamiltoniano, espín, dualidad onda-partícula, de Broglie, Compton, efecto fotoeléctrico, efecto Zeeman, Davisson-Germer, Thomson.
 - Espectroscopia: espectro, fotón, Rydberg, Balmer, series espectrales, ultravioleta, rayos X, rayos catódicos, líneas de absorción/emisión.
@@ -508,12 +508,19 @@ El criterio es **léxico, no semántico**: la presencia de al menos uno de los t
 - Química nuclear (contenida en el programa): radionúclido, radioisótopo, radioactividad, desintegración, nucleón, defecto de masa, lantánidos, actínidos.
 - Acoplamiento angular: Russell-Saunders (LS), acoplamiento jj, término espectral, multiplicidad, momento magnético, mu_L, mu_S, mu_J.
 - Métodos autoconsistentes: Hartree-Fock, operador de intercambio.
+- Antimateria (v5): positrón, antielectrón — física cuántica de partículas presente en cursos de estructura atómica.
+- Notación electrónica (v5): superíndice y subíndice — en el contexto de este curso el referente es la notación de configuración electrónica (1s²) o el símbolo nuclear (¹²C₆).
 
-**Excluido deliberadamente del alcance (v4):**
-- Física de altas energías: tokamak, antimateria, 4 fuerzas fundamentales, Big Bang, materia oscura, gravedad cuántica.
-- Razón: fuera del contenido específico del curso. Si alguno de estos términos aparece en mensajes del corpus, es conversación extracurricular y E5 lo excluye correctamente.
+**Excluido deliberadamente del alcance (v5), con fundamento:**
 
-**Nota sobre notación superíndice/subíndice** (ej. *¿qué es el superíndice y subíndice en la notación de electrones?*): aunque el mensaje usa lenguaje de notación tipográfica, su referente es la configuración electrónica. A partir de v4, este tipo de mensaje es **incluible** si el codificador juzga, por contexto, que el referente es la configuración electrónica. E5 no lo captura léxicamente; si hay duda, el ítem se codifica y el codificador marca `confianza = 2`.
+| Término | Razón de exclusión |
+|---------|-------------------|
+| Tokamak | Ingeniería de fusión nuclear aplicada; fuera del programa de Estructura de la Materia |
+| 4 fuerzas fundamentales | Física general introductoria; no es contenido específico del curso |
+| Big Bang, materia oscura, gravedad cuántica | Cosmología y física de altas energías |
+| Velocidad de la luz en millas por hora | Conversión de unidades sin contexto químico identificable |
+
+La regla de decisión para casos nuevos es: el término debe hacer **imposible** que el mensaje sea conversación trivial ajena al programa de Estructura de la Materia de FESC-UNAM. Cuando la conexión con el curso es indirecta (la constante o el fenómeno *aparece* en el programa pero el mensaje no lo invoca en ese contexto), se excluye.
 
 ## A.2 Historial de versiones
 
@@ -523,6 +530,7 @@ El criterio es **léxico, no semántico**: la presencia de al menos uno de los t
 | v2 | 2026-08-14 | Añadidos: hamiltoniano, espín, Slater, de Broglie, Compton, Stern-Gerlach, Hartree-Fock, acoplamiento angular, radionúclidos, lantánidos/actínidos, efectos fotoeléctrico/Zeeman, series espectrales, Davisson-Germer, Planck, Zeff. Aún sobre texto con acentos. | ≈ 20 % |
 | v3 | 2026-08-14 | Más términos nuevos. Problema identificado: el patrón se aplicaba sobre texto con acentos → `cuant` no capturaba `cuánticos`. Primera auditoría manual: 22/30 exclusiones eran falsos positivos. | ≈ 18 % |
 | v4 | 2026-08-14 | **Corrección crítica**: E5 se aplica sobre `norm` (texto normalizado sin diacríticos). Resultado: `cuant` captura `cuántico`, `anfiprot` captura `anfiprótica`, `ionizacion` captura `ionización`, etc. Segunda auditoría manual: 1/17 exclusiones borderline (≈ 6 % de error residual). Ítems elegibles: de 153 (v3) a 267 (v4). | ≈ 6 % |
+| v5 | 2026-08-14 | **Decisión de scope tras auditoría**: añadidos `antimater` (positrón/antielectrón, física cuántica atómica) y `superindice\|subindice` (notación de configuración electrónica). Confirmados como exclusiones correctas: tokamak, 4 fuerzas fundamentales, velocidad de la luz en millas (regla documentada en A.1). Ítems elegibles: 267 → 269 (+2). | ≈ 5.5 % |
 
 ## A.3 Protocolo de auditoría de E5
 
@@ -541,8 +549,9 @@ Para la sección de metodología del artículo se reportará:
 
 1. Número total de mensajes de usuario en el corpus.
 2. Número y porcentaje excluidos por E1–E5 (tabla de exclusiones).
-3. Versión de E5 en vigor al momento del export (v4, 2026-08-14).
+3. Versión de E5 en vigor al momento del export (v5, 2026-08-14).
 4. Resultado de la auditoría manual (N revisados, N errores, % falsos positivos).
 5. El patrón léxico completo se incluirá como material suplementario.
+6. Decisiones de scope: qué términos se incluyeron o excluyeron deliberadamente y por qué (ver tabla en A.1).
 
-La transparencia sobre las iteraciones del criterio (v1 → v4) es necesaria porque la tasa de exclusión cambió de 37 % a 6 % entre versiones. Ocultar esto haría el corpus no reproducible.
+La transparencia sobre las iteraciones del criterio (v1 → v5) es necesaria porque la tasa de exclusión cambió de 37 % a ≈ 5.5 % entre versiones. Ocultar esto haría el corpus no reproducible. La narrativa del artículo es: el criterio original sobreexcluía porque el patrón se aplicaba sobre texto con diacríticos (bug técnico, no de juicio); la auditoría lo detectó; la corrección es técnicamente trivial y metodológicamente justificada.

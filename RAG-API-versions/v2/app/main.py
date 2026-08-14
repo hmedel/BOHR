@@ -1145,7 +1145,14 @@ async def export_bloom_coding(
     #       lantanida/lantonida, zeff, defecto de masa, poliprot, foto electrico,
     #       lineas de absorcion/emision, elementos ligeros/pesados.
     #       Excluidos deliberadamente: tokamak, Big Bang, gravedad, 4 fuerzas,
-    #       materia oscura, antimateria — fuera del contenido especifico del curso.
+    #       materia oscura, antimateria — pendiente de decision de scope.
+    #   v5 (2026-08-14, decision de scope): añadidos antimater y superindice|subindice.
+    #       Antimateria: positron/antielectron es fisica cuantica atomica, incluir.
+    #       Superindice/subindice: referente casi siempre es configuracion electronica
+    #       o simbolo nuclear en este curso, incluir.
+    #       Confirmados como exclusion correcta: tokamak (ingenieria de fusion),
+    #       4 fuerzas fundamentales (fisica general), velocidad de la luz en millas
+    #       (conversion de unidades sin contexto quimico).
     # Criterio: presencia del termino hace imposible que el mensaje sea
     # conversacion trivial fuera del curso de quimica cuantica/estructura atomica.
     chem_pattern = re.compile(
@@ -1181,7 +1188,14 @@ async def export_bloom_coding(
         r"van der waals|fuerzas de van|"
         r"rusel+.saunders|rusel+ saunders|terminos de|acoplamiento ls|acoplamiento jj|"
         r"momento magnetico|mu_l|mu_s|mu_j|"
-        r"radio ironico|radio ionico)",  # captura typos comunes de 'iónico'
+        r"radio ironico|radio ionico|"  # captura typos comunes de 'iónico'
+        # v5 (2026-08-14): dos casos confirmados tras auditoría E5 + decisión de scope:
+        #   antimater: antimateria (positrón/antielectrón → física cuántica del átomo)
+        #   superindice|subindice: notación de configuración electrónica (1s²) o símbolo nuclear
+        # Excluidos deliberadamente (fuera del programa): tokamak, 4 fuerzas fundamentales,
+        #   velocidad de la luz en millas por hora (conversión de unidades sin contexto químico)
+        r"antimater|"
+        r"superindice|subindice)",
         re.IGNORECASE,
     )
 
