@@ -1278,16 +1278,26 @@ async def export_bloom_coding(
             "nota": "",
         })
 
-    # Muestra principal = TODA la poblacion elegible, permutada por semilla.
+    # Conjunto piloto de entrenamiento.
+    # El manual (E.1) requiere 25 items que los codificadores trabajen juntos
+    # antes de codificar la muestra definitiva, y que NO formen parte de
+    # ninguna muestra posterior. Se apartan con seed fija (seed=0) para que
+    # sean siempre los mismos independientemente de la semilla del codificador.
+    # Se extraen ANTES de permutar la muestra principal.
+    _pilot_rng = _random.Random(0)
+    _pilot_pool = list(included)
+    _pilot_rng.shuffle(_pilot_pool)
+    pilot_sample = _pilot_pool[:25]
+    pilot_ids = {r["id_item"] for r in pilot_sample}
+
+    # Muestra principal = elegibles MENOS el piloto, permutada por semilla.
     # La semilla determina el orden, no el subconjunto: ambos codificadores
     # ven los mismos items en distinto orden (requisito del manual A.4).
     #
     # Complementaria: los items de estratos altos (analizar/evaluar/crear) forman
-    # parte de la muestra principal, no son disjuntos. La columna _bloom_auto
-    # (que los codificadores no ven) permite identificarlos en el analisis.
-    # Sacarlos de la principal dejaría la matriz de confusion sin filas en esos niveles.
+    # parte de la muestra principal, no son disjuntos.
     high_levels = {"analizar", "evaluar", "crear"}
-    main_sample = list(included)    # todos los elegibles, sin excluir los de estrato alto
+    main_sample = [r for r in included if r["id_item"] not in pilot_ids]
     rng.shuffle(main_sample)        # permutacion por semilla
 
     # Pares de consistencia intracodificador.
@@ -1456,7 +1466,7 @@ async def export_bloom_coding(
     _e5_audit_rng.shuffle(e5_excluded_items)
     e5_audit_sample = e5_excluded_items[:30]
     e5_audit_buf = io.StringIO()
-    e5_audit_buf.write(f"# AUDITORIA E5 — 30 items excluidos al azar (seed=42, fecha={ts})\n")
+    e5_audit_buf.write(f"# AUDITORIA E5 — {len(e5_audit_sample)} items excluidos al azar (seed=42, fecha={ts})\n")
     e5_audit_buf.write(f"# Revisar manualmente: verificar que ningun item tiene contenido quimico\n")
     e5_audit_buf.write(f"# del curso de Estructura de la Materia.\n")
     e5_audit_buf.write(f"# Si un item DEBIO incluirse, reportarlo: indica que E5 subexcluye.\n")
@@ -1465,89 +1475,125 @@ async def export_bloom_coding(
     for row in e5_audit_sample:
         e5_audit_writer.writerow({**row, "es_quimica_legitima": "", "nota": ""})
 
-    # Empaquetar en ZIP
-    zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+    # Distribución de versiones del clasificador (para el articulo)
+    ver_dist: dict = {}
+    for r in main_sample:
+        cv_ = r.get("classifier_version", "legacy")
+        ver_dist[cv_] = ver_dist.get(cv_, 0) + 1
+
+    stats = {
+        "fecha_corte": ts,
+        "semilla": seed,
+        "nota_semilla": (
+            "La semilla permuta el ORDEN de los items, no los items mismos. "
+            "Ambos codificadores reciben los mismos N items en distinto orden."
+        ),
+        "sistema": {
+            "classifier_version": CLASSIFIER_VERSION,
+            "model_version": MODEL_VERSION,
+            "prompt_version": PROMPT_VERSION,
+        },
+        "total_mensajes_usuario": len(all_user_msgs),
+        "exclusiones": exclusion_counts,
+        "nota_exclusiones": (
+            "E4_same: duplicado exacto del mismo usuario. "
+            "E4_cross: texto normalizado identico entre usuarios distintos "
+            "(posible enunciado de tarea transcrito al chat — hallazgo a reportar). "
+            "E5 se aplica sobre texto normalizado (NFD, sin acentos, sin puntuacion); "
+            "ver historial de versiones en manual_codificacion v1.2, seccion A.2."
+        ),
+        "elegibles_total": len(included),
+        "piloto_n": len(pilot_sample),
+        "piloto_ids": [r["id_item"] for r in pilot_sample],
+        "nota_piloto": (
+            "25 items apartados con seed=0 antes de permutar la muestra principal. "
+            "No forman parte de ninguna muestra posterior (manual E.1). "
+            "Los dos codificadores los trabajan juntos para calibrar antes de codificar."
+        ),
+        "muestra_principal_n": len(main_sample),
+        "muestra_complementaria_n": len(comp_sample),
+        "distribucion_classifier_version_muestra_principal": ver_dist,
+        "nota_legacy": (
+            "classifier_version='legacy' indica items clasificados antes de P1.2 "
+            "(sin metadatos de trazabilidad). Este estudio valida el clasificador pre-auditoria."
+        ),
+        "estratos_en_principal": {
+            lv: sum(1 for r in main_sample if r["_bloom_auto"] == lv)
+            for lv in sorted(high_levels)
+        },
+        "nota_complementaria": (
+            "Los items de estrato alto estan INCLUIDOS en la muestra principal. "
+            "El archivo complementaria es una vista, no un conjunto disjunto. "
+            "Con N pequeno, reportar como evidencia cualitativa, no estimacion de acuerdo."
+        ),
+        # pares_consistencia: SOLO en el zip del coordinador, no en el del codificador.
+        # Las etiquetas a/b estan ancladas al id_item, no a la posicion de cada semilla.
+        "pares_consistencia": {k: v for k, v in _chosen_pairs.items()},
+        "nota_pares": (
+            f"{_pair_num} pares de alta similitud (>=0.95) seleccionados con seed=42 fija. "
+            "Ambos miembros separados >=40 posiciones en CADA orden (seed=42 y seed=99). "
+            "El codificador NO ve este campo ni la columna _consistency_pair en el CSV. "
+            "Permite medir consistencia intracodificador sin costo adicional. "
+            "Etiquetas P1a/P1b ancladas al id_item, no a la posicion."
+        ),
+        "e5_auditoria_n": len(e5_excluded_items),  # total excluidos por E5, no muestra
+        "e5_auditoria_muestra_n": len(e5_audit_sample),
+        "nota_e5_auditoria": (
+            f"E5 excluyó {len(e5_excluded_items)} items en total. "
+            f"Se revisan {len(e5_audit_sample)} al azar (seed=42) en auditoria_e5.csv. "
+            "La auditoria la hace un docente que NO sea ninguno de los dos codificadores, "
+            "antes de que estos codifiquen (ver el material antes del estudio condiciona). "
+            "Ver historial de E5 en manual_codificacion v1.2, seccion A.2."
+        ),
+    }
+
+    # ZIP del codificador: SOLO el CSV principal.
+    # No incluye stats (revela pares), complementaria (revela estratos Bloom),
+    # auditoria E5 ni piloto (los 25 se distribuyen por separado en papel/presencial).
+    coder_zip_buf = io.BytesIO()
+    with zipfile.ZipFile(coder_zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"bloom_principal_seed{seed}_{ts}.csv", main_csv)
+    coder_zip_buf.seek(0)
+
+    # ZIP del coordinador: todo — stats, pares, complementaria, auditoria E5, piloto.
+    # Obtener con ?coordinator=1 (requiere ser admin, igual que el endpoint base).
+    coordinator_zip_buf = io.BytesIO()
+
+    # CSV piloto (sin _bloom_auto visible)
+    pilot_csv = write_csv(
+        pilot_sample,
+        "piloto",
+        [
+            f"CONJUNTO PILOTO — 25 items de entrenamiento (seed=0, fecha={ts})",
+            f"NO forman parte de ninguna muestra posterior (manual E.1).",
+            f"Distribuir a ambos codificadores para calibracion conjunta antes de codificar.",
+            f"Llenar las mismas columnas que en la muestra principal.",
+        ],
+    )
+
+    with zipfile.ZipFile(coordinator_zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"bloom_principal_seed{seed}_{ts}.csv", main_csv)
+        zf.writestr(f"bloom_piloto_{ts}.csv", pilot_csv)
         zf.writestr(f"bloom_complementaria_seed{seed}_{ts}.csv", comp_csv)
         zf.writestr(f"auditoria_e5_{ts}.csv", e5_audit_buf.getvalue())
-        # Estadisticas de muestreo + trazabilidad de versiones para el artículo
+        zf.writestr(f"estadisticas_muestreo_seed{seed}_{ts}.json",
+                    _json.dumps(stats, indent=2, ensure_ascii=False))
+    coordinator_zip_buf.seek(0)
 
-        # Distribución de versiones del clasificador en la muestra principal
-        # (útil para el artículo si hay mensajes "legacy" sin classifier_meta)
-        ver_dist: dict = {}
-        for r in main_sample:
-            cv_ = r.get("classifier_version", "legacy")
-            ver_dist[cv_] = ver_dist.get(cv_, 0) + 1
-
-        # Concentracion de usuarios en la muestra principal (para reportar en el articulo)
-        # Nota: id_usuario no va en el CSV ciego, pero si en las estadisticas internas.
-        user_item_counts: dict = {}
-        for r in main_sample:
-            # _bloom_auto es el unico campo interno disponible aqui; usamos id_item
-            # para reconstruir la concentracion (el coordinador tiene la tabla de enlace)
-            pass  # concentracion calculada en analyze_participation.py con acceso a BD
-
-        stats = {
-            "fecha_corte": ts,
-            "semilla": seed,
-            "nota_semilla": (
-                "La semilla permuta el ORDEN de los items, no los items mismos. "
-                "Ambos codificadores reciben la poblacion completa elegible en distinto orden."
-            ),
-            # Versiones del sistema al momento del export
-            "sistema": {
-                "classifier_version": CLASSIFIER_VERSION,
-                "model_version": MODEL_VERSION,
-                "prompt_version": PROMPT_VERSION,
-            },
-            "total_mensajes_usuario": len(all_user_msgs),
-            "exclusiones": exclusion_counts,
-            "nota_exclusiones": (
-                "E4_same: duplicado exacto del mismo usuario. "
-                "E4_cross: texto normalizado identico entre usuarios distintos "
-                "(posible enunciado de tarea transcrito al chat — hallazgo a reportar)."
-            ),
-            "incluidos_tras_exclusion": len(included),
-            "muestra_principal_n": len(main_sample),
-            "muestra_complementaria_n": len(comp_sample),
-            "distribucion_classifier_version_muestra_principal": ver_dist,
-            "nota_legacy": (
-                "classifier_version='legacy' indica items clasificados antes de P1.2 "
-                "(sin metadatos de trazabilidad). Este estudio valida el clasificador pre-auditoria."
-            ),
-            "estratos_en_principal": {
-                lv: sum(1 for r in main_sample if r["_bloom_auto"] == lv)
-                for lv in sorted(high_levels)
-            },
-            "nota_complementaria": (
-                "Los items de estrato alto estan INCLUIDOS en la muestra principal. "
-                "El archivo complementaria es una vista, no un conjunto disjunto. "
-                "Con N pequeño, reportar como evidencia cualitativa, no estimacion de acuerdo."
-            ),
-            "pares_consistencia": {
-                k: v for k, v in _chosen_pairs.items()
-            },
-            "nota_pares": (
-                f"{_pair_num} pares de alta similitud (>=0.95) seleccionados con seed=42. "
-                "Ambos miembros de cada par estan en la muestra principal separados >=40 posiciones. "
-                "El codificador no ve la columna _consistency_pair. "
-                "Permite medir consistencia intracodificador sin costo adicional."
-            ),
-            "e5_auditoria_n": len(e5_audit_sample),
-            "nota_e5_auditoria": (
-                "30 items excluidos por E5 al azar (seed=42) incluidos en auditoria_e5.csv. "
-                "Un docente debe revisarlos para verificar que E5 no excluye quimica legitima. "
-                "Sin esta revision el estudio no es interpretable."
-            ),
-        }
-        zf.writestr(f"estadisticas_muestreo_{ts}.json", _json.dumps(stats, indent=2, ensure_ascii=False))
-    zip_buf.seek(0)
-
+    # Decidir que ZIP devolver segun parametro coordinator
+    coordinator = request.query_params.get("coordinator", "0")
+    if coordinator == "1":
+        return StreamingResponse(
+            iter([coordinator_zip_buf.getvalue()]),
+            media_type="application/zip",
+            headers={"Content-Disposition":
+                     f"attachment; filename=bloom_coordinador_seed{seed}_{ts}.zip"},
+        )
     return StreamingResponse(
-        iter([zip_buf.getvalue()]),
+        iter([coder_zip_buf.getvalue()]),
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=bloom_coding_{ts}.zip"},
+        headers={"Content-Disposition":
+                 f"attachment; filename=bloom_codificador_seed{seed}_{ts}.zip"},
     )
 
 
