@@ -187,6 +187,97 @@ def get_active_exam(user_id: int, db: Session) -> Optional[Exam]:
 
     return latest_exam
 
+def generate_exam_question(
+    conversation_history: list,
+    topics: list,
+    question_number: int,
+    total_questions: int,
+    previous_levels: list,
+    difficulty_profile: dict,
+) -> Optional[dict]:
+    """
+    Genera una pregunta de examen fundamentada en el corpus.
+
+    Flujo:
+    1. Recupera pasajes del corpus via rag_engine.retrieve_passages_for_exam()
+    2. Llama al LLM con evidencia
+    3. Si el LLM reporta evidencia_insuficiente, reintenta con temas rotados
+       (hasta 2 reintentos con subconjuntos distintos de topics)
+    4. Si agota los reintentos, genera sin evidencia (degradado, registrado en log)
+
+    Devuelve el dict de pregunta (con pasaje_fuente si se usó evidencia) o None.
+    """
+    topics_list = list(topics)
+
+    for attempt in range(3):
+        # Rotar los temas en cada reintento para variar la búsqueda
+        rotated = topics_list[attempt:] + topics_list[:attempt]
+
+        try:
+            passages = rag_engine.retrieve_passages_for_exam(
+                topics=rotated[:3],  # máximo 3 temas por búsqueda
+                n_passages=6,
+            )
+        except Exception as exc:
+            logger.warning("retrieve_passages_for_exam fallo: %s", exc)
+            passages = []
+
+        prompt = exam_engine.generate_single_question_prompt(
+            conversation_history=conversation_history,
+            topics=topics_list,
+            question_number=question_number,
+            total_questions=total_questions,
+            previous_levels=previous_levels,
+            difficulty_profile=difficulty_profile,
+            evidence_passages=passages if passages else None,
+        )
+
+        raw = rag_engine._call_llm(prompt, temperature=0.3)
+        question = exam_engine.parse_question_from_llm(raw)
+
+        if question is None:
+            logger.warning("parse_question_from_llm: JSON inválido en intento %d", attempt + 1)
+            continue
+
+        if question.get("error") == "evidencia_insuficiente":
+            logger.info(
+                "Evidencia insuficiente para pregunta %d (intento %d), rotando temas",
+                question_number, attempt + 1,
+            )
+            continue
+
+        # Pregunta válida
+        if not question.get("pasaje_fuente") and passages:
+            # LLM no completó el campo aunque había evidencia — marcar como no auditada
+            question["pasaje_fuente"] = ""
+            question["documento_fuente"] = ""
+            question["_sin_pasaje"] = True
+
+        return question
+
+    # Agotados los reintentos: generar sin evidencia como último recurso
+    logger.warning(
+        "Generando pregunta %d sin evidencia del corpus (reintentos agotados)",
+        question_number,
+    )
+    prompt = exam_engine.generate_single_question_prompt(
+        conversation_history=conversation_history,
+        topics=topics_list,
+        question_number=question_number,
+        total_questions=total_questions,
+        previous_levels=previous_levels,
+        difficulty_profile=difficulty_profile,
+        evidence_passages=None,
+    )
+    raw = rag_engine._call_llm(prompt, temperature=0.3)
+    question = exam_engine.parse_question_from_llm(raw)
+    if question and not question.get("error"):
+        question["pasaje_fuente"] = ""
+        question["documento_fuente"] = ""
+        question["_sin_pasaje"] = True
+    return question
+
+
 def should_offer_exam(conv_messages: list) -> bool:
     """
     Ofrece examen una sola vez por conversación cuando se cumplen:
@@ -391,8 +482,8 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
             db.commit()
             db.refresh(new_exam)
 
-            # Generar primera pregunta
-            prompt = exam_engine.generate_single_question_prompt(
+            # Generar primera pregunta fundamentada en el corpus
+            question = generate_exam_question(
                 conversation_history=all_messages,
                 topics=list(topics),
                 question_number=1,
@@ -400,11 +491,8 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                 previous_levels=[],
                 difficulty_profile=difficulty_profile,
             )
-            
-            question_json = rag_engine._call_llm(prompt, temperature=0.3)
-            question = exam_engine.parse_question_from_llm(question_json)
-            
-            if not question:
+
+            if not question or question.get("error"):
                 raise HTTPException(status_code=500, detail="Error generando pregunta")
             
             # Guardar pregunta
@@ -510,7 +598,7 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                         Message.role == "user"
                     ).all()
                     
-                    prompt = exam_engine.generate_single_question_prompt(
+                    next_question = generate_exam_question(
                         conversation_history=all_messages,
                         topics=exam_data.get("topics", []),
                         question_number=next_q,
@@ -518,11 +606,8 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                         previous_levels=previous_levels,
                         difficulty_profile=exam_data.get("difficulty_profile"),
                     )
-                    
-                    next_question_json = rag_engine._call_llm(prompt, temperature=0.3)
-                    next_question = exam_engine.parse_question_from_llm(next_question_json)
-                    
-                    if next_question:
+
+                    if next_question and not next_question.get("error"):
                         # Guardar siguiente pregunta
                         exam_data[f"question_{next_q}"] = next_question
                         exam_data["current_question"] = next_q

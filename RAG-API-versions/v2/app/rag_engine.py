@@ -219,6 +219,72 @@ class RAGEngine:
 
         return result
     
+    def retrieve_passages_for_exam(
+        self,
+        topics: List[str],
+        n_passages: int = 6,
+        chars_per_passage: int = 600,
+    ) -> List[Dict]:
+        """
+        Recupera pasajes del corpus relevantes para los temas de examen.
+
+        Diseñado para ser llamado sincrónicamente desde ExamEngine.
+        Reutiliza el mecanismo de búsqueda existente (vectorstore.similarity_search)
+        sin añadir nueva infraestructura.
+
+        Args:
+            topics: lista de identificadores de tema (ej. ["estructura_atomica", "orbitales"])
+            n_passages: número total de pasajes a devolver (distribuidos entre temas)
+            chars_per_passage: límite de caracteres por pasaje para el prompt
+
+        Returns:
+            Lista de dicts [{text, source, topic}], ordenada por relevancia estimada.
+            Puede ser vacía si ChromaDB no tiene resultados.
+        """
+        # Mapeo de identificadores internos de tema a consulta en lenguaje natural
+        TOPIC_QUERIES = {
+            "estructura_atomica": "estructura atomica numero atomico radio electronico",
+            "mecanica_cuantica": "mecanica cuantica funcion de onda principio incertidumbre",
+            "enlaces_quimicos": "enlace quimico covalente ionico electronegatividad",
+            "espectroscopia": "espectroscopia emision absorcion fotón niveles energia",
+            "orbitales": "orbital atomico numero cuantico aufbau configuracion electronica",
+            "termodinamica": "termodinamica entalpia entropia energia libre gibbs",
+            "estructura_molecular": "geometria molecular vsepr momento dipolar polaridad",
+        }
+
+        passages_per_topic = max(1, n_passages // max(1, len(topics)))
+        collected: List[Dict] = []
+
+        for topic in topics:
+            query = TOPIC_QUERIES.get(topic, topic.replace("_", " "))
+            try:
+                results = self.vectorstore.similarity_search(query, k=30)
+                # Tomar los mejores passages_per_topic sin filtrar por fuente
+                # (el filtro por fuente causaría menos diversidad temática)
+                for doc in results[:passages_per_topic]:
+                    text = doc.page_content.strip()
+                    source = doc.metadata.get("source", "desconocido")
+                    if text:
+                        collected.append({
+                            "text": text[:chars_per_passage],
+                            "source": source.replace(".md", "").replace("_", " "),
+                            "topic": topic,
+                        })
+            except Exception as e:
+                logger.warning("retrieve_passages_for_exam: topic=%s error=%s", topic, str(e)[:80])
+
+        # Deduplicar por texto exacto (puede haber solapamiento entre temas)
+        seen: set = set()
+        unique: List[Dict] = []
+        for p in collected:
+            key = p["text"][:120]
+            if key not in seen:
+                seen.add(key)
+                unique.append(p)
+
+        logger.info("retrieve_passages_for_exam: %d pasajes para temas %s", len(unique), topics)
+        return unique
+
     def _detect_exam_mode(self, query: str) -> bool:
         """Detectar si el usuario solicita un examen"""
         exam_triggers = [
