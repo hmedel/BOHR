@@ -160,17 +160,46 @@ en los temas estudiados, pero ten en cuenta que esta pregunta no
 podra ser auditada contra el material de la asignatura.
 """
 
-        return f"""# GENERACION DE PREGUNTA DE EXAMEN FORMATIVO
+        # La última pregunta del examen es siempre de desarrollo corto.
+        # Las anteriores son de opción múltiple.
+        es_desarrollo = (question_number == total_questions)
 
-## CONTEXTO
-**Pregunta {question_number} de {total_questions}**
-**Temas estudiados:** {topics_summary}
-**Conceptos explorados por el estudiante:**
-{concepts_summary}{history_note}
-{evidence_section}
-{fundamento_instruccion}
+        if es_desarrollo:
+            formato_instruccion = f"""
+Genera UNA SOLA PREGUNTA DE DESARROLLO CORTO (respuesta redactada, 3-6 oraciones).
+**Nivel objetivo Bloom:** {target_level}
 
-Genera UNA SOLA PREGUNTA de opcion multiple (preferentemente) o desarrollo corto.
+La pregunta debe requerir que el estudiante EXPLIQUE, RELACIONE o ARGUMENTE
+un concepto a partir del material estudiado. No uses opciones múltiples.
+
+### FORMATO JSON (devolver solo el JSON, sin texto adicional)
+
+{{
+  "numero": {question_number},
+  "nivel_bloom": "{target_level}",
+  "tipo": "desarrollo_corto",
+  "enunciado": "[Pregunta abierta que pide explicar, relacionar o argumentar]",
+  "instruccion_estudiante": "Redacta tu respuesta en 3 a 6 oraciones completas.",
+  "pasaje_fuente": "[Cita textual breve del pasaje que inspira la pregunta, max 150 chars]",
+  "documento_fuente": "[Nombre del documento del que proviene el pasaje]",
+  "criterios_evaluacion": {{
+    "para_docente": "Esta pregunta no se evalua automaticamente. La respuesta del estudiante se guarda para revision manual."
+  }},
+  "recursos_estudio": [
+    "Revisar [seccion especifica del documento fuente]"
+  ]
+}}
+
+REQUISITOS:
+- Pregunta abierta, sin opciones
+- Redactada desde la evidencia disponible cuando la haya
+- pasaje_fuente y documento_fuente obligatorios cuando hay evidencia
+- No incluir respuesta modelo en el JSON
+
+GENERA SOLO EL JSON:"""
+        else:
+            formato_instruccion = f"""
+Genera UNA SOLA PREGUNTA de opcion multiple.
 **Nivel objetivo Bloom:** {target_level}
 
 ### FORMATO JSON (devolver solo el JSON, sin texto adicional)
@@ -210,6 +239,17 @@ REQUISITOS:
 - pasaje_fuente y documento_fuente obligatorios cuando hay evidencia
 
 GENERA SOLO EL JSON:"""
+
+        return f"""# GENERACION DE PREGUNTA DE EXAMEN FORMATIVO
+
+## CONTEXTO
+**Pregunta {question_number} de {total_questions}**
+**Temas estudiados:** {topics_summary}
+**Conceptos explorados por el estudiante:**
+{concepts_summary}{history_note}
+{evidence_section}
+{fundamento_instruccion}
+{formato_instruccion}"""
     
     @staticmethod
     def parse_question_from_llm(llm_response: str) -> Optional[Dict]:
@@ -312,19 +352,57 @@ GENERA SOLO EL JSON:"""
         is_correct: Optional[bool] = None
     ) -> Dict:
         """
-        Evaluar respuesta del estudiante SIN revelar la correcta
+        Evaluar respuesta del estudiante SIN revelar la correcta.
+
+        Para preguntas de opcion_multiple: determina is_correct automaticamente
+        comparando la letra elegida con _respuesta_correcta.
+
+        Para preguntas de desarrollo_corto: is_correct queda en None.
+        La respuesta se guarda integra para revision docente posterior.
+        No se evalua automaticamente (no hay clave correcta).
         """
-        
-        # Determinar si es correcta (si es opción múltiple)
-        if question.get("tipo") == "opcion_multiple":
-            correct_letter = question.get("_respuesta_correcta", "").upper().strip()
-            cleaned = student_answer.strip().upper() if student_answer else ""
-            student_letter = cleaned[0] if cleaned else ""
-            is_correct = (student_letter == correct_letter)
-        
+
+        tipo = question.get("tipo", "opcion_multiple")
+
+        # ── Pregunta de desarrollo corto ─────────────────────────────────────
+        if tipo == "desarrollo_corto":
+            feedback = """### Respuesta registrada
+
+Tu respuesta ha quedado guardada. Las preguntas de desarrollo son revisadas
+por el docente, no por el sistema automatico.
+
+**Que se valora en este tipo de pregunta:**
+- Precision conceptual: usar los terminos correctos del tema
+- Coherencia: que las ideas esten bien conectadas
+- Profundidad: ir mas alla de la definicion y relacionar conceptos
+
+**Recursos de estudio:**
+"""
+            for recurso in question.get("recursos_estudio", []):
+                feedback += f"- {recurso}\n"
+
+            return {
+                # is_correct es None: no hay evaluacion automatica posible.
+                # El campo existe en el esquema de ExamResult pero no se cuenta
+                # en correct_count al generar el resumen final.
+                "is_correct": None,
+                "outcome_label": "pendiente_revision",
+                "nivel": "pendiente_revision",
+                "feedback": feedback,
+                "recursos_recomendados": question.get("recursos_estudio", []),
+                "tipo": "desarrollo_corto",
+            }
+
+        # ── Pregunta de opcion multiple (comportamiento anterior) ─────────────
+        # Determinar si es correcta
+        correct_letter = question.get("_respuesta_correcta", "").upper().strip()
+        cleaned = student_answer.strip().upper() if student_answer else ""
+        student_letter = cleaned[0] if cleaned else ""
+        is_correct = (student_letter == correct_letter)
+
         # Criterios de evaluación
         criterios = question.get("criterios_evaluacion", {})
-        
+
         # Generar feedback segun resultado.
         # La longitud de la respuesta NO indica calidad: en opcion multiple el
         # estudiante escribe una letra, por lo que len() < 20 siempre y el
@@ -334,7 +412,7 @@ GENERA SOLO EL JSON:"""
         if is_correct:
             nivel = "excelente"
             feedback_base = criterios.get(nivel, "Respuesta correcta")
-            
+
             feedback = f"""### Respuesta Correcta
 
 {feedback_base}
@@ -350,11 +428,11 @@ Has demostrado comprensión del concepto. Tu respuesta indica que identificaste 
 """
             for recurso in question.get("recursos_estudio", [])[:2]:
                 feedback += f"- {recurso}\n"
-            
+
         else:
             nivel = "insuficiente"
             feedback_base = criterios.get(nivel, "Revisa los conceptos fundamentales")
-            
+
             feedback = f"""### Oportunidad de Aprendizaje
 
 {feedback_base}
@@ -366,12 +444,12 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
 """
             for recurso in question.get("recursos_estudio", []):
                 feedback += f"- {recurso}\n"
-            
+
             # _conceptos_clave no se incluye en el feedback: su contenido
             # (p.ej. "Debe identificar X") puede revelar la respuesta correcta
             # cuando el estudiante falla. Se usa en cambio recursos_estudio,
             # que no contiene la respuesta.
-        
+
         return {
             "is_correct": is_correct,
             # outcome_label: "excelente"/"insuficiente" son etiquetas de
@@ -382,6 +460,7 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
             "nivel": "excelente" if is_correct else "insuficiente",
             "feedback": feedback,
             "recursos_recomendados": question.get("recursos_estudio", []),
+            "tipo": "opcion_multiple",
         }
     
     @staticmethod
@@ -392,7 +471,12 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
         """Generar resumen final del examen"""
         
         total_questions = len(questions_and_answers)
-        correct_count = sum(1 for qa in questions_and_answers if qa.get("evaluation", {}).get("is_correct", False))
+        # Las preguntas de desarrollo (is_correct=None) no se cuentan en
+        # correct_count; solo contribuyen las de opcion_multiple.
+        mc_qas = [qa for qa in questions_and_answers
+                  if qa.get("question", {}).get("tipo") != "desarrollo_corto"]
+        correct_count = sum(1 for qa in mc_qas if qa.get("evaluation", {}).get("is_correct", False))
+        total_mc = len(mc_qas)
         
         # Análisis por nivel Bloom
         bloom_distribution = {}
@@ -400,20 +484,28 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
             nivel = qa.get("question", {}).get("nivel_bloom", "desconocido")
             bloom_distribution[nivel] = bloom_distribution.get(nivel, 0) + 1
         
-        # Generar recomendaciones
-        if correct_count == total_questions:
+        # Generar recomendaciones (solo sobre preguntas de opción múltiple)
+        if total_mc == 0:
+            nivel_global = "Examen completado"
+            descripcion = "Has completado el examen. Las respuestas quedan registradas para revisión del docente."
+        elif correct_count == total_mc:
             nivel_global = "Excelente comprension"
             descripcion = "Demuestras dominio sólido de los conceptos estudiados. Has alcanzado los objetivos de aprendizaje."
-        elif correct_count >= total_questions * 0.7:
+        elif correct_count >= total_mc * 0.7:
             nivel_global = "Buena comprension"
             descripcion = "Tienes una base sólida. Con un poco más de práctica alcanzarás el dominio completo."
-        elif correct_count >= total_questions * 0.5:
+        elif correct_count >= total_mc * 0.5:
             nivel_global = "Comprension en desarrollo"
             descripcion = "Estás construyendo tu conocimiento. Dedica tiempo a repasar los conceptos fundamentales."
         else:
             nivel_global = "Iniciando el aprendizaje"
             descripcion = "Estás en las etapas iniciales. No te desanimes, todos comenzamos aquí. Enfócate en los conceptos básicos."
-        
+
+        has_desarrollo = any(
+            qa.get("question", {}).get("tipo") == "desarrollo_corto"
+            for qa in questions_and_answers
+        )
+
         summary = f"""# Resumen del Examen Formativo
 
 ## {nivel_global}
@@ -425,7 +517,9 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
 ## Resultados
 
 **Preguntas respondidas:** {total_questions}
-**Respuestas correctas:** {correct_count}
+**Preguntas de opción múltiple:** {total_mc}
+**Respuestas correctas (opción múltiple):** {correct_count}
+{f"**Preguntas de desarrollo:** 1 (pendiente de revisión docente)" if has_desarrollo else ""}
 
 ### Distribución por Nivel Bloom
 """
@@ -442,23 +536,28 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
         for i, qa in enumerate(questions_and_answers, 1):
             q = qa.get("question", {})
             ev = qa.get("evaluation", {})
-            is_correct = ev.get("is_correct", False)
-            icon = "✅" if is_correct else "❌"
+            tipo_q = q.get("tipo", "opcion_multiple")
             enunciado = q.get("enunciado", "")
-            correct_letter = q.get("_respuesta_correcta", "")
-            opciones = q.get("opciones", [])
 
-            summary += f"### {'Correcta' if is_correct else 'Incorrecta'}: Pregunta {i} — {q.get('nivel_bloom','').title()}\n\n"
-            summary += f"{enunciado}\n\n"
-            if opciones:
-                for op in opciones:
-                    summary += f"{op}\n"
-                summary += "\n"
-            summary += f"**Tu respuesta:** {qa.get('answer','')}\n\n"
-            # La respuesta correcta NO se revela en el resumen para preservar
-            # el valor de uso de las preguntas en exámenes futuros.
-            # Si en el futuro se decide mostrarla, agregar aqui.
-            summary += f"**Retroalimentacion:** {ev.get('feedback','').splitlines()[1] if ev.get('feedback') else ''}\n\n---\n\n"
+            if tipo_q == "desarrollo_corto":
+                summary += f"### Pregunta {i} — {q.get('nivel_bloom','').title()} (Desarrollo)\n\n"
+                summary += f"{enunciado}\n\n"
+                summary += f"**Tu respuesta:**\n\n> {qa.get('answer','')}\n\n"
+                summary += "_Esta pregunta será revisada por el docente. No se evalúa automáticamente._\n\n---\n\n"
+            else:
+                is_correct = ev.get("is_correct", False)
+                opciones = q.get("opciones", [])
+
+                summary += f"### {'Correcta' if is_correct else 'Incorrecta'}: Pregunta {i} — {q.get('nivel_bloom','').title()}\n\n"
+                summary += f"{enunciado}\n\n"
+                if opciones:
+                    for op in opciones:
+                        summary += f"{op}\n"
+                    summary += "\n"
+                summary += f"**Tu respuesta:** {qa.get('answer','')}\n\n"
+                # La respuesta correcta NO se revela en el resumen para preservar
+                # el valor de uso de las preguntas en exámenes futuros.
+                summary += f"**Retroalimentacion:** {ev.get('feedback','').splitlines()[1] if ev.get('feedback') else ''}\n\n---\n\n"
 
         summary += f"""
 ## Temas cubiertos
@@ -475,13 +574,15 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
 
 """
         if correct_count > 0:
-            summary += f"- Has demostrado comprensión en {correct_count} de {total_questions} preguntas\n"
+            summary += f"- Has demostrado comprensión en {correct_count} de {total_mc} preguntas de opción múltiple\n"
             summary += "- Capacidad para identificar conceptos clave\n"
-            if correct_count >= total_questions * 0.7:
+            if total_mc > 0 and correct_count >= total_mc * 0.7:
                 summary += "- Buen nivel de retención de información\n"
         else:
             summary += "- Has completado el examen, lo cual es el primer paso\n"
             summary += "- Has identificado áreas específicas de estudio\n"
+        if has_desarrollo:
+            summary += "- Has redactado una respuesta de desarrollo (en revisión)\n"
         
         summary += """
 ---
@@ -490,7 +591,7 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
 
 """
         
-        if correct_count == total_questions:
+        if total_mc == 0 or correct_count == total_mc:
             summary += """**Objetivo:** Profundizar y aplicar conocimientos
 
 **Acciones recomendadas:**
@@ -501,7 +602,7 @@ No te preocupes, el error es parte del aprendizaje. Esta pregunta toca conceptos
 
 **Tiempo estimado:** 1-2 semanas de práctica avanzada
 """
-        elif correct_count >= total_questions * 0.7:
+        elif total_mc > 0 and correct_count >= total_mc * 0.7:
             summary += """**Objetivo:** Consolidar y reforzar
 
 **Acciones recomendadas:**

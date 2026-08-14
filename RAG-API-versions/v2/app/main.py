@@ -515,9 +515,12 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                 for opcion in question['opciones']:
                     question_display += f"{opcion}\n"
                 question_display += "\n**Responde con la letra (A, B, C o D) y justifica brevemente tu elección.**"
+            elif question.get("tipo") == "desarrollo_corto":
+                instruccion = question.get("instruccion_estudiante", "Redacta tu respuesta en 3 a 6 oraciones completas.")
+                question_display += f"\n_{instruccion}_"
             else:
                 question_display += "\n**Escribe tu respuesta.**"
-            
+
             return {
                 "answer": question_display,
                 "sources": [],
@@ -634,6 +637,9 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                             for opcion in next_question['opciones']:
                                 feedback_display += f"{opcion}\n"
                             feedback_display += "\n**Responde con la letra y justifica brevemente.**"
+                        elif next_question.get("tipo") == "desarrollo_corto":
+                            instruccion = next_question.get("instruccion_estudiante", "Redacta tu respuesta en 3 a 6 oraciones completas.")
+                            feedback_display += f"\n_{instruccion}_"
                 
                 else:
                     # Era la última pregunta - generar resumen
@@ -658,9 +664,20 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                         exam_data.get("topics", [])
                     )
                     
-                    # Guardar resultado final
-                    correct_count = sum(1 for qa in questions_and_answers if qa.get("evaluation", {}).get("is_correct", False))
-                    
+                    # Guardar resultado final.
+                    # Las preguntas de desarrollo (is_correct=None) no se
+                    # cuentan en correct_count; solo opcion_multiple.
+                    mc_qas_final = [
+                        qa for qa in questions_and_answers
+                        if qa.get("question", {}).get("tipo") != "desarrollo_corto"
+                    ]
+                    desarrollo_qas = [
+                        qa for qa in questions_and_answers
+                        if qa.get("question", {}).get("tipo") == "desarrollo_corto"
+                    ]
+                    correct_count = sum(1 for qa in mc_qas_final if qa.get("evaluation", {}).get("is_correct", False))
+                    total_mc_final = len(mc_qas_final)
+
                     # Calcular distribuciones reales
                     bloom_dist = {}
                     solo_dist = {}
@@ -668,7 +685,9 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                         bl = qa.get("question", {}).get("nivel_bloom", "")
                         sl = qa.get("evaluation", {}).get("nivel", "")
                         if bl: bloom_dist[bl] = bloom_dist.get(bl, 0) + 1
-                        if sl: solo_dist[sl] = solo_dist.get(sl, 0) + 1
+                        # solo_dist excluye "pendiente_revision" (no es nivel SOLO)
+                        if sl and sl not in ("pendiente_revision", ""):
+                            solo_dist[sl] = solo_dist.get(sl, 0) + 1
 
                     # solo_dist ahora siempre estara vacio porque solo_level
                     # se guarda como NULL (ver P0.2). El fallback que inferida
@@ -676,7 +695,9 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                     # una invencion, no una medicion. predominant_solo_level
                     # queda en NULL hasta que haya evaluacion SOLO real.
                     predominant_solo = None
-                    strengths = [f"Respondió correctamente {correct_count} de {total_q} preguntas"]
+                    strengths = [f"Respondió correctamente {correct_count} de {total_mc_final} preguntas de opción múltiple"]
+                    if desarrollo_qas:
+                        strengths.append("Completó una pregunta de desarrollo (pendiente de revisión docente)")
                     if bloom_dist:
                         top_bloom = max(bloom_dist, key=bloom_dist.get)
                         strengths.append(f"Mayor desempeño en nivel Bloom: {top_bloom}")
@@ -686,7 +707,10 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                         user_id=current_user.id,
                         # predominant_solo_level es NULL: no hay evaluacion SOLO real todavia.
                         predominant_solo_level=predominant_solo,
-                        overall_description=f"Completo {total_q} preguntas con {correct_count} correctas",
+                        overall_description=(
+                            f"Completo {total_q} preguntas: {correct_count}/{total_mc_final} opcion multiple"
+                            + (f", 1 desarrollo" if desarrollo_qas else "")
+                        ),
                         strengths=json.dumps(strengths),
                         improvement_plan=json.dumps({"plan": "Revisar los temas con menor desempeno"}),
                         bloom_distribution=json.dumps(bloom_dist),
