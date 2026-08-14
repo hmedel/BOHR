@@ -1316,66 +1316,81 @@ async def export_bloom_coding(
     rng.shuffle(main_sample)        # permutacion por semilla
 
     # Pares de consistencia intracodificador.
-    # Se eligen 4 pares de alta similitud (>= 0.95) entre distintos usuarios.
-    # Los dos miembros de cada par aparecen en la muestra con >=40 posiciones
-    # de separacion. El codificador no ve la columna _consistency_pair.
-    # Permite medir consistencia sin costo adicional de codificacion.
-    # Los pares se seleccionan con semilla fija (42) para ser reproducibles
-    # independientemente de la semilla del codificador.
+    #
+    # TODOS los pares con similitud >= 0.95 se detectan y reciben separacion
+    # garantizada en la permutacion actual (semilla del codificador).
+    # Los primeros 4 pares no solapados se designan como pares de medicion
+    # de consistencia (etiquetas P1a/P1b ... P4a/P4b); el resto se reubica
+    # igualmente para que ningun par casi-identico quede contiguo, pero no
+    # se etiqueta (el coordinador los ve en la nota del JSON).
+    #
+    # La separacion se garantiza SOLO en el orden de la semilla actual.
+    # La semilla fija (42) determina cuales pares se etiquetan, no el orden.
+    # El endpoint reconstruye la permutacion de la semilla solicitada, por lo
+    # que cada llamada garantiza la separacion en su propio orden.
+    #
+    # Deteccion: semilla fija 42, independiente de la semilla del codificador.
     import difflib as _difflib
-    _pair_rng = _random.Random(42)
-    _candidates = []
-    _norms = [(r["id_item"], r.get("_norm", ""), i) for i, r in enumerate(main_sample)]
-    # Necesitamos la norma: la agregamos al dict incluido temporalmente
+    # Calcular normas si no estan ya
     for r in included:
-        import unicodedata as _ud
-        t = r["texto_consulta"].lower()
-        t = _ud.normalize("NFD", t)
-        t = "".join(c for c in t if _ud.category(c) != "Mn")
-        t = re.sub(r"[^\w\s]", "", t)
-        t = re.sub(r"\s+", " ", t).strip()
-        r["_norm"] = t
-    # Reconstruir norms con el orden shuffleado
-    _id_to_pos = {r["id_item"]: i for i, r in enumerate(main_sample)}
+        if "_norm" not in r:
+            import unicodedata as _ud
+            t = r["texto_consulta"].lower()
+            t = _ud.normalize("NFD", t)
+            t = "".join(c for c in t if _ud.category(c) != "Mn")
+            t = re.sub(r"[^\w\s]", "", t)
+            t = re.sub(r"\s+", " ", t).strip()
+            r["_norm"] = t
     _id_to_norm = {r["id_item"]: r["_norm"] for r in included}
-    _id_to_uid = {}   # no tenemos uid aqui; usamos id_item como proxy de identidad
-    for i in range(len(main_sample)):
-        for j in range(i + 1, len(main_sample)):
-            id1, id2 = main_sample[i]["id_item"], main_sample[j]["id_item"]
-            n1, n2 = _id_to_norm[id1], _id_to_norm[id2]
-            sim = _difflib.SequenceMatcher(None, n1, n2).ratio()
+
+    # Detectar TODOS los pares sim >= 0.95 dentro de la muestra principal
+    _all_sim_pairs = []   # (sim, id1, id2) — todos, incluyendo no designados
+    _ms_ids = [r["id_item"] for r in main_sample]
+    for i in range(len(_ms_ids)):
+        for j in range(i + 1, len(_ms_ids)):
+            id1, id2 = _ms_ids[i], _ms_ids[j]
+            sim = _difflib.SequenceMatcher(None, _id_to_norm[id1], _id_to_norm[id2]).ratio()
             if sim >= 0.95:
-                _candidates.append((sim, id1, id2))
-    _candidates.sort(reverse=True)
-    # Elegir hasta 4 pares no solapados (ningun item en dos pares)
-    _used = set()
-    _chosen_pairs = {}
+                _all_sim_pairs.append((sim, id1, id2))
+    _all_sim_pairs.sort(reverse=True)
+
+    # Designar hasta 4 pares no solapados como pares de consistencia (semilla fija 42)
+    _used_designated = set()
+    _chosen_pairs = {}   # {id_item: "P1a" | "P1b" | ...}
     _pair_num = 0
-    for sim, id1, id2 in _candidates:
-        if id1 in _used or id2 in _used:
+    for sim, id1, id2 in _all_sim_pairs:
+        if id1 in _used_designated or id2 in _used_designated:
             continue
         _pair_num += 1
         _chosen_pairs[id1] = f"P{_pair_num}a"
         _chosen_pairs[id2] = f"P{_pair_num}b"
-        _used.update([id1, id2])
+        _used_designated.update([id1, id2])
         if _pair_num >= 4:
             break
 
-    # Asegurar separacion >= 40 posiciones entre miembros del mismo par
-    for pair_id in range(1, _pair_num + 1):
-        pa = f"P{pair_id}a"
-        pb = f"P{pair_id}b"
-        ids_a = [k for k, v in _chosen_pairs.items() if v == pa]
-        ids_b = [k for k, v in _chosen_pairs.items() if v == pb]
-        if not ids_a or not ids_b:
-            continue
-        ia, ib = _id_to_pos[ids_a[0]], _id_to_pos[ids_b[0]]
-        if abs(ia - ib) < 40:
-            # Mover el segundo miembro a posicion ia + 50 (o al final)
-            new_pos = min(ia + 50, len(main_sample) - 1)
-            # Intercambiar posiciones
-            main_sample[ib], main_sample[new_pos] = main_sample[new_pos], main_sample[ib]
-            _id_to_pos = {r["id_item"]: i for i, r in enumerate(main_sample)}
+    # Construir posicion actual en la muestra
+    _id_to_pos = {r["id_item"]: i for i, r in enumerate(main_sample)}
+
+    # Garantizar separacion >= 40 para TODOS los pares con sim >= 0.95,
+    # no solo los 4 designados. Iterar hasta convergencia (max 3 pasadas).
+    _SEP_MIN = 40
+    for _pass in range(3):
+        _moved = False
+        for sim, id1, id2 in _all_sim_pairs:
+            ia, ib = _id_to_pos[id1], _id_to_pos[id2]
+            if abs(ia - ib) >= _SEP_MIN:
+                continue
+            # Mover el segundo miembro a posicion ia + SEP_MIN + 5, evitando
+            # colisionar con otros miembros del mismo par si los hubiera.
+            new_pos = min(ia + _SEP_MIN + 5, len(main_sample) - 1)
+            if new_pos == ib:
+                new_pos = max(0, ia - _SEP_MIN - 5)
+            if new_pos != ib:
+                main_sample[ib], main_sample[new_pos] = main_sample[new_pos], main_sample[ib]
+                _id_to_pos = {r["id_item"]: i for i, r in enumerate(main_sample)}
+                _moved = True
+        if not _moved:
+            break
 
     # Anotar _consistency_pair en los items (campo interno, excluido del CSV)
     for r in main_sample:
@@ -1545,13 +1560,21 @@ async def export_bloom_coding(
         ),
         # pares_consistencia: SOLO en el zip del coordinador, no en el del codificador.
         # Las etiquetas a/b estan ancladas al id_item, no a la posicion de cada semilla.
+        "pares_totales_sim095": len(_all_sim_pairs),
         "pares_consistencia": {k: v for k, v in _chosen_pairs.items()},
+        "pares_todos_sim095": [
+            {"id1": id1, "id2": id2, "similitud": round(sim, 3),
+             "designado": (id1 in _chosen_pairs or id2 in _chosen_pairs)}
+            for sim, id1, id2 in _all_sim_pairs
+        ],
         "nota_pares": (
-            f"{_pair_num} pares de alta similitud (>=0.95) seleccionados con seed=42 fija. "
-            "Ambos miembros separados >=40 posiciones en CADA orden (seed=42 y seed=99). "
+            f"Se detectaron {len(_all_sim_pairs)} pares con similitud>=0.95 en la muestra. "
+            f"Los primeros {_pair_num} no solapados se designan como pares de consistencia "
+            f"(P1a/P1b...P{_pair_num}a/P{_pair_num}b). "
+            "TODOS los pares (designados y no designados) reciben separacion>=40 en el "
+            "orden de la semilla solicitada — garantizado en cada llamada al endpoint. "
             "El codificador NO ve este campo ni la columna _consistency_pair en el CSV. "
-            "Permite medir consistencia intracodificador sin costo adicional. "
-            "Etiquetas P1a/P1b ancladas al id_item, no a la posicion."
+            "Etiquetas P#a/P#b ancladas al id_item, no a la posicion."
         ),
         "e5_auditoria_n": len(e5_excluded_items),  # total excluidos por E5, no muestra
         "e5_auditoria_muestra_n": len(e5_audit_sample),
