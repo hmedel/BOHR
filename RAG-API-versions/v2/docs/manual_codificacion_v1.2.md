@@ -1,7 +1,7 @@
 # Manual de codificación Bloom y SOLO, y banco de reactivos abiertos
 
 Proyecto BOHR — Estructura de la Materia, FESC-UNAM  
-Versión 1.4 (2026-08-14): correcciones al Apéndice A — convención de conteo E5 declarada (primera coincidencia en cascada), números reconciliados (E5=14, incluidos=207), tamizado léxico descrito con precisión, modelo de IA corregido y cita de JCE actualizada.
+Versión 1.5 (2026-08-14): Apéndice A — números reconciliados contra el export real: corpus=358, E1=23 E2=0 E3=2 E4_same=12 E4_cross=38 E5=14, elegibles=269, principal=244. Tabla A.2 reducida a v4/v5 exactas; v1–v3 en prosa. Párrafo v4→v5 reescrito. URL de JCE corregida.
 
 *Cambios v1.1 (2026-08-14): reactivos R5.1, R6.1 y R7.1 completados con elementos esperados, anclas relacionales/abstracto extendido y techo. Sin cambios en protocolo, reglas de desempate ni reactivos R1–R4.*
 
@@ -9,7 +9,9 @@ Versión 1.4 (2026-08-14): correcciones al Apéndice A — convención de conteo
 
 *Cambios v1.3 (2026-08-14): cinco correcciones al Apéndice A. (1) Denominador fijado en 358 en toda la tabla A.2. (2) Borderline v4 corregido a 2/17. (3) Limitación de consultas multiparte declarada, con ejemplo M369/M273. (4) Auditoría inversa de incluidos añadida al protocolo A.3. (5) Declaración de participación de IA en decisiones de scope añadida a A.3.*
 
-*Cambios v1.4 (2026-08-14): cuatro correcciones al Apéndice A. (1) Convención de conteo E5 declarada explícitamente: primera coincidencia en cascada E1→E5 (misma lógica del JSON del export). Tabla A.2 recalculada con esa convención: E5=14, incluidos=207 en corpus de 247. (2) A.3.2 reemplaza «barrido completo de 229 incluidos» por descripción precisa del tamizado léxico automatizado con sus limitaciones. (3) A.3.4: nombre del modelo corregido (no se atribuye versión específica; se indica que el nombre verificable debe tomarse del historial de la conversación). (4) Cita de Author Guidelines de JCE actualizada a versión del 9 de agosto de 2026 con fecha de acceso.*
+*Cambios v1.4 (2026-08-14): cuatro correcciones al Apéndice A. (1) Convención de conteo E5 declarada: primera coincidencia en cascada. (2) A.3.2: tamizado léxico descrito con precisión. (3) A.3.4: nombre del modelo sin versión específica. (4) Cita JCE con fecha de actualización y de acceso.*
+
+*Cambios v1.5 (2026-08-14): correcciones derivadas de verificar contra el export real. (1) Corpus corregido: 358 mensajes totales (no 247), los mensajes de prueba del administrador caen en E1/E3/E4 por contenido, no por un criterio de usuario. (2) Tabla A.2 reducida: solo v4 y v5 con cifras exactas; v1–v3 en prosa para no publicar aproximaciones en tabla. (3) Párrafo v4→v5 reescrito: en v4 E5 excluyó 16 ítems; en v5 se reincorporaron 2 → E5=14. (4) A.3.2 y A.3.3 actualizadas con 269 elegibles y 244 de la muestra principal. (5) URL de Author Guidelines de JCE corregida a researcher-resources.acs.org.*
 
 Este manual tiene dos usos independientes:
 
@@ -540,21 +542,30 @@ Si una pregunta nueva no puede resolverse por estas dos sub-reglas, el coordinad
 
 ## A.2 Historial de versiones
 
-**Convención de conteo:** todas las cifras de esta tabla usan la misma lógica del export — los criterios se aplican en cascada (E1 → E2 → E3 → E4 → E5) y cada ítem se asigna al primer criterio que lo captura. Un ítem que falla E1 y también carecería de química no se cuenta en E5. Esta es la única convención que permite reconstruir la población a partir de la tabla de exclusiones. El denominador fijo es el total del corpus en cada versión.
+**Convención de conteo:** los criterios se aplican en cascada (E1 → E2 → E3 → E4 → E5) y cada ítem se asigna al primer criterio que lo captura. Esta convención es la misma que usa el endpoint y es la única que permite reconstruir la población a partir de la tabla.
 
-| Versión | Corpus total | Excluidos E1–E4 | Excluidos E5 (primera coincidencia) | Incluidos |
-|---------|---:|---:|---:|---:|
-| v1 | 358 | ~89 | ~131 | ~138 |
-| v2 | 358 | ~89 | ~71 | ~198 |
-| v3 | 358 | ~89 | ~64 | ~205 |
-| v4 | 247 | 26 | 14 | 207 |
-| v5 (actual) | 247 | 26 | **14** | **207** |
+**v1–v3 (prosa):** el criterio original excluía aproximadamente un tercio del corpus porque el patrón léxico se aplicaba sobre texto con diacríticos — `cuant` no capturaba `cuánticos`. La primera auditoría manual (22 de 30 exclusiones eran falsos positivos) lo detectó. Las versiones v2 y v3 ampliaron el vocabulario pero no corrigieron el fallo de normalización; v4 lo corrige. Las tasas de v1–v3 no se reportan en tabla porque los conteos originales no están almacenados y las reconstrucciones aproximadas no son verificables.
 
-*Nota: los valores de v1–v3 son aproximaciones reconstruidas; el corpus era 358 mensajes pero el conteo exacto de E1–E4 para esas versiones no está almacenado. Los valores de v4 y v5 son exactos (corpus actual = 247 mensajes de usuario no-admin, fecha de corte 2026-08-14).*
+**Cifras exactas del export v2.9.8 (2026-08-14), corpus = 358 mensajes de usuario:**
 
-**Cambio de v4 a v5:** E5 pasó de 14 a 14 (sin cambio en el conteo por cascada) porque los 2 ítems reincorporados (antimateria, superíndice) habían sido capturados por E5 en v4; al añadir sus términos al patrón, siguen pasando pero ahora por inclusión positiva, no por ausencia de exclusión. El cambio es de correctitud de la regla, no de tamaño de la muestra.
+| Criterio | Excluidos | Acumulado excluido | Restantes |
+|----------|----------:|-------------------:|----------:|
+| Corpus total | — | 0 | 358 |
+| E1 (< 15 caracteres) | 23 | 23 | 335 |
+| E2 (saludo/despedida) | 0 | 23 | 335 |
+| E3 (interacción examen) | 2 | 25 | 333 |
+| E4-same (dup. mismo usuario) | 12 | 37 | 321 |
+| E4-cross (dup. inter-usuario) | 38 | 75 | 283 |
+| **E5** (sin química) | **14** | **89** | **269** |
+| **Elegibles** | — | — | **269** |
+| Piloto (seed=0, aparado) | 25 | — | 244 |
+| **Muestra principal** | — | — | **244** |
 
-**Auditoría v4:** segunda auditoría manual sobre 17 exclusiones E5 → **2/17 borderline (≈ 12 %)**, superando el umbral del 10 % → se revisó el patrón (resultado: v5).
+*Nota: los mensajes de prueba de la cuenta `admin` (≈110 mensajes) no se excluyen por un criterio de usuario sino que caen en E1, E3 o E4 por su propio contenido (saludos de prueba, duplicados, frases cortas). No existe criterio E0 de elegibilidad por rol de usuario; la cuenta `admin` participa en la cascada en igualdad de condiciones.*
+
+**Cambio de v4 a v5:** en v4, el patrón E5 excluía 16 ítems. Tras la auditoría (2/17 borderline, umbral 10 % activado), se reincorporaron 2 ítems añadiendo `antimater` y `superindice|subindice` al patrón. En v5, E5 excluye **14 ítems** (= 16 − 2). El tamaño de la muestra principal pasó de 242 a 244.
+
+**Auditoría v4:** segunda auditoría manual sobre 17 exclusiones E5 → **2/17 borderline (≈ 12 %)**, umbral del 10 % activado → se revisó el patrón (resultado: v5).
 
 ## A.3 Protocolo de auditoría de E5
 
@@ -578,7 +589,7 @@ Con E5 en ≈ 5 % de exclusión, el riesgo principal es ya la sobreinclusión: �
 
 Si la proporción de errores supera el 10 %, revisar el patrón antes de proceder.
 
-**Tamizado previo del export v2.9.8 (2026-08-14):** sobre los 207 ítems incluidos se aplicó un tamizado léxico automatizado con listas de términos fuera de programa (cosmología, astronomía, ingeniería de fusión) y de marcadores conversacionales. Este tamizado no es una auditoría semántica exhaustiva: un ítem fuera de scope redactado sin ninguno de los términos de la lista no habría sido detectado. El resultado fue 1 caso identificado (M369, documentado en A.3.3). Los seis ítems del tipo «¿podrías darme el hamiltoniano de X?» (cortesía alrededor de química legítima) se codifican normalmente. El tamizado fue realizado con apoyo de un modelo de lenguaje (ver A.3.4); la auditoría humana de A.3.2 lo reemplaza, no lo confirma.
+**Tamizado previo del export v2.9.8 (2026-08-14):** sobre los 269 ítems elegibles se aplicó un tamizado léxico automatizado con listas de términos fuera de programa (cosmología, astronomía, ingeniería de fusión) y de marcadores conversacionales. Este tamizado no es una auditoría semántica exhaustiva: un ítem fuera de scope redactado sin ninguno de los términos de la lista no habría sido detectado. El resultado fue 1 caso identificado (M369, documentado en A.3.3). Los seis ítems del tipo «¿podrías darme el hamiltoniano de X?» (cortesía alrededor de química legítima) se codifican normalmente. El tamizado fue realizado con apoyo de un modelo de lenguaje (ver A.3.4); la auditoría humana de A.3.2 lo reemplaza, no lo confirma.
 
 ### A.3.3 Limitación conocida: consultas multiparte
 
@@ -587,7 +598,7 @@ E5 es un criterio léxico. Una consulta que combina un término dentro de scope 
 > **M369:** *«Que es el defecto de masa y que es un tokamak?»* → **incluida** (dispara `defecto de masa`)  
 > **M273:** *«Que es un tokamak?»* → **excluida** (no dispara ningún término)
 
-El mismo contenido recibe tratamiento opuesto según venga solo o empaquetado con contenido químico. Esta es una limitación estructural de cualquier criterio léxico aplicado a consultas multiparte; no se resuelve añadiendo términos. En el corpus v2.9.8 hay **1 ítem de este tipo** (M369) sobre 207 incluidos (0.5 %). El ítem se codifica normalmente; el codificador debe clasificar el nivel más alto de los subcomponentes (R5 del protocolo), independientemente de que uno de ellos caiga fuera del scope de E5.
+El mismo contenido recibe tratamiento opuesto según venga solo o empaquetado con contenido químico. Esta es una limitación estructural de cualquier criterio léxico aplicado a consultas multiparte; no se resuelve añadiendo términos. En el corpus v2.9.8 hay **1 ítem de este tipo** (M369) sobre 269 elegibles (0.4 %; sobre la muestra principal de 244: 0.4 %). El ítem se codifica normalmente; el codificador debe clasificar el nivel más alto de los subcomponentes (R5 del protocolo), independientemente de que uno de ellos caiga fuera del scope de E5.
 
 ### A.3.4 Declaración de uso de IA en decisiones de scope
 
@@ -595,7 +606,7 @@ Las decisiones de reincorporación de v4 a v5 (antimateria y superíndice/subín
 
 **Acción requerida antes de la codificación formal:** un docente que no sea ninguno de los dos codificadores debe revisar `auditoria_e5.csv` del export en uso, registrar `es_quimica_legitima` y `nota` para cada ítem, y firmar el resultado. Si el docente coincide con la decisión de reincorporar antimateria y superíndice, se documenta la concordancia entre revisión humana y revisión asistida por IA como dato adicional de transparencia. Si discrepa, su juicio tiene precedencia.
 
-Esta declaración debe incluirse en la sección de Agradecimientos del artículo conforme a las *Author Guidelines* de *Journal of Chemical Education* (ACS; última actualización: 9 de agosto de 2026; consultadas: 14 de agosto de 2026; https://pubs.acs.org/page/jceda8/submission/authors.html), que exigen indicar las herramientas de IA utilizadas y los autores que se responsabilizan de ello.
+Esta declaración debe incluirse en la sección de Agradecimientos del artículo conforme a las *Author Guidelines* de *Journal of Chemical Education* (ACS; última actualización: 9 de agosto de 2026; consultadas: 14 de agosto de 2026; https://researcher-resources.acs.org/publishingguides/journal-of-chemical-education/), que exigen indicar las herramientas de IA utilizadas y los autores que se responsabilizan de ello.
 
 ## A.4 Definición del scope para el artículo
 
@@ -612,4 +623,4 @@ La transparencia sobre las iteraciones del criterio (v1 → v5) es necesaria por
 
 **Limitación a declarar:** E5 tiene la limitación estructural de las consultas multiparte descrita en A.3.3. En el corpus actual hay 1 ítem afectado (0.4 % de los incluidos). Esta proporción es lo suficientemente pequeña para no comprometer la muestra; se declara como limitación metodológica conocida en la sección de método del artículo.
 
-**Nota sobre el conteo de E5 en los exports:** el archivo `estadisticas_muestreo_seed42.json` del export v2.9.8 reporta `e5_auditoria_n: 14` (bajo la convención de primera coincidencia en cascada). El corpus en el momento del export tenía 247 mensajes de usuario; con la cascada E1→E5, las exclusiones son: E1=15, E3=6, E4=5, E5=14, total excluidos=40, incluidos=207. Los CSVs de codificación corresponden al corpus del momento del export; la fecha de corte efectiva es el timestamp en el nombre de los archivos CSV.
+**Nota sobre los números del export:** el archivo `estadisticas_muestreo_seed42.json` del export v2.9.8 reporta: corpus=358, E1=23, E2=0, E3=2, E4_same=12, E4_cross=38, E5=14, elegibles=269, piloto=25, muestra_principal=244. Estos son los números de referencia para el artículo. La fecha de corte efectiva es el timestamp en el nombre de los archivos CSV.
