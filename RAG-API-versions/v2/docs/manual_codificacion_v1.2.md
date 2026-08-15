@@ -1,7 +1,7 @@
 # Manual de codificación Bloom y SOLO, y banco de reactivos abiertos
 
 Proyecto BOHR — Estructura de la Materia, FESC-UNAM  
-Versión 1.6 (2026-08-14): criterio E0 agregado (cuentas admin excluidas antes de la cascada). Números definitivos: bruto=357, E0=122, no-admin=235, cascada→elegibles=171, piloto=25, principal=146.
+Versión 1.7 (2026-08-14): sep≥40 garantizado por verificación post-escritura (no pre). 13 estudiantes distintos en muestra principal; charly.2000.cr@gmail.com aporta 61/146 (42%). Nota de distribución añadida a A.4.
 
 *Cambios v1.1 (2026-08-14): reactivos R5.1, R6.1 y R7.1 completados con elementos esperados, anclas relacionales/abstracto extendido y techo. Sin cambios en protocolo, reglas de desempate ni reactivos R1–R4.*
 
@@ -14,6 +14,8 @@ Versión 1.6 (2026-08-14): criterio E0 agregado (cuentas admin excluidas antes d
 *Cambios v1.5 (2026-08-14): correcciones derivadas de verificar contra el export real. (1) Corpus corregido: 358 mensajes totales (no 247), los mensajes de prueba del administrador caen en E1/E3/E4 por contenido, no por un criterio de usuario. (2) Tabla A.2 reducida: solo v4 y v5 con cifras exactas; v1–v3 en prosa para no publicar aproximaciones en tabla. (3) Párrafo v4→v5 reescrito: en v4 E5 excluyó 16 ítems; en v5 se reincorporaron 2 → E5=14. (4) A.3.2 y A.3.3 actualizadas con 269 elegibles y 244 de la muestra principal. (5) URL de Author Guidelines de JCE corregida a researcher-resources.acs.org.*
 
 *Cambios v1.6 (2026-08-14): criterio E0 agregado al protocolo y al código. Auditoría cruzando exclusiones por usuario reveló que 90 mensajes de la cuenta `admin` y 10 de `hmedel@tec.mx` sobrevivían la cascada y aparecían en los elegibles (37 % de la muestra anterior). E0 excluye todos los mensajes de cuentas con `is_admin=True` antes de la cascada E1–E5. Números definitivos del export v2.9.10: bruto=357, E0=122, no-admin=235, E1=15, E2=0, E3=0, E4_same=4, E4_cross=33, E5=12, elegibles=171, piloto=25, muestra principal=146.*
+
+*Cambios v1.7 (2026-08-14): (1) `_enforce_separation` reescrito con verificación exhaustiva post-escritura — el endpoint lanza excepción si queda algún par con sep<40, en lugar de entregar datos incorrectos silenciosamente. (2) Distribución de estudiantes añadida a A.4: 13 usuarios distintos; usuario más activo aporta 61/146 ítems (42 %). (3) Verificado: 0 violaciones en seed=42 y seed=99 sobre el nuevo export.*
 
 Este manual tiene dos usos independientes:
 
@@ -628,3 +630,17 @@ La transparencia sobre las iteraciones del criterio (v1 → v5) es necesaria por
 **Limitación a declarar:** E5 tiene la limitación estructural de las consultas multiparte descrita en A.3.3. En el corpus actual hay 1 ítem afectado (0.4 % de los incluidos). Esta proporción es lo suficientemente pequeña para no comprometer la muestra; se declara como limitación metodológica conocida en la sección de método del artículo.
 
 **Nota sobre los números del export:** el archivo `estadisticas_muestreo_seed42.json` del export v2.9.10 reporta: bruto=357, E0=122, no-admin=235, E1=15, E2=0, E3=0, E4_same=4, E4_cross=33, E5=12, elegibles=171, piloto=25, muestra_principal=146. Estos son los números de referencia para el artículo. La fecha de corte efectiva es el timestamp en el nombre de los archivos CSV.
+
+**Distribución de estudiantes en la muestra principal (146 ítems, 13 usuarios):**
+
+| Usuario | Ítems | % |
+|---------|------:|--:|
+| charly.2000.cr@gmail.com | 61 | 42 % |
+| poncearellanomiguelangel@gmail.com | 20 | 14 % |
+| guantex1725@gmail.com | 18 | 12 % |
+| zara.bello96@gmail.com | 15 | 10 % |
+| sergiogarcialaraidln@gmail.com | 12 | 8 % |
+| G01E013 | 10 | 7 % |
+| Otros 7 usuarios | 10 | 7 % |
+
+El corpus no es una muestra de la población de estudiantes de la asignatura sino el total de interacciones de los usuarios registrados en el periodo. La concentración en un usuario (42 %) es un dato que el artículo debe reportar explícitamente: los resultados del estudio de validez caracterizan en gran parte el comportamiento de ese usuario, no el promedio del grupo. El análisis de acuerdo puede estratificarse por usuario si la N lo permite.

@@ -1385,29 +1385,86 @@ async def export_bloom_coding(
     _id_to_pos = {r["id_item"]: i for i, r in enumerate(main_sample)}
 
     def _enforce_separation(sample, sim_pairs, sep_min):
-        """Reubica items para garantizar separacion >= sep_min en todos los pares."""
-        id_to_pos = {r["id_item"]: i for i, r in enumerate(sample)}
+        """Reubica items para garantizar separacion >= sep_min en TODOS los pares.
+
+        Estrategia: para cada item que participa en al menos un par violado, lo
+        reubicamos directamente a una posicion que maximice la distancia minima a
+        TODOS sus vecinos de alta similitud simultáneamente. Iteramos hasta
+        convergencia o 50 pasos.
+
+        Verificacion final: si queda alguna violacion, lanzar excepcion para que
+        el endpoint no entregue datos incorrectos silenciosamente.
+        """
         N = len(sample)
-        for _pass in range(10):
-            moved = False
-            for _sim, _a, _b in sim_pairs:
-                ia, ib = id_to_pos[_a], id_to_pos[_b]
-                if abs(ia - ib) >= sep_min:
-                    continue
-                # Buscar posicion destino para _b: ia + sep_min + 5,
-                # o si esta al final, ia - sep_min - 5
-                candidate = ia + sep_min + 5
-                if candidate >= N:
-                    candidate = ia - sep_min - 5
-                if candidate < 0:
-                    candidate = N - 1
-                if candidate == ib:
-                    continue
-                sample[ib], sample[candidate] = sample[candidate], sample[ib]
-                id_to_pos = {r["id_item"]: i for i, r in enumerate(sample)}
-                moved = True
-            if not moved:
+
+        # Construir mapa de vecinos: para cada item, todos los items con sim>=0.95
+        neighbors = {}  # id -> set(id)
+        for _sim, _a, _b in sim_pairs:
+            neighbors.setdefault(_a, set()).add(_b)
+            neighbors.setdefault(_b, set()).add(_a)
+
+        def violations_of(id_to_pos):
+            return [
+                (_a, _b, abs(id_to_pos[_a] - id_to_pos[_b]))
+                for _sim, _a, _b in sim_pairs
+                if abs(id_to_pos[_a] - id_to_pos[_b]) < sep_min
+            ]
+
+        for _pass in range(50):
+            id_to_pos = {r["id_item"]: i for i, r in enumerate(sample)}
+            viols = violations_of(id_to_pos)
+            if not viols:
                 break
+
+            # Recolectar items a mover (el segundo de cada par violado)
+            # Ordenar por número de vecinos desc para resolver primero los nodos más conectados
+            to_move = {}
+            for _a, _b, _ in viols:
+                # Mover el item con más vecinos para impactar más pares a la vez
+                if len(neighbors.get(_b, set())) >= len(neighbors.get(_a, set())):
+                    to_move[_b] = _a  # mover _b, anclar _a
+                else:
+                    to_move[_a] = _b  # mover _a, anclar _b
+
+            for item, anchor in to_move.items():
+                id_to_pos = {r["id_item"]: i for i, r in enumerate(sample)}
+                ia = id_to_pos[anchor]
+                ib = id_to_pos[item]
+
+                # Encontrar posicion destino: el punto mas alejado de TODOS los vecinos
+                all_neighbor_pos = [id_to_pos[nb] for nb in neighbors.get(item, set())
+                                    if nb in id_to_pos]
+                # Probar posiciones en los extremos y en el centro
+                candidates = [
+                    ia + sep_min + 5,
+                    ia - sep_min - 5,
+                    ia + sep_min + N // 4,
+                    ia - sep_min - N // 4,
+                ]
+                best_candidate = None
+                best_min_dist = -1
+                for cand in candidates:
+                    cand = max(0, min(N - 1, cand))
+                    if cand == ib:
+                        continue
+                    # distancia minima a todos los vecinos desde esta posicion candidata
+                    min_d = min((abs(cand - p) for p in all_neighbor_pos), default=sep_min)
+                    if min_d > best_min_dist:
+                        best_min_dist = min_d
+                        best_candidate = cand
+
+                if best_candidate is not None and best_candidate != ib:
+                    sample[ib], sample[best_candidate] = sample[best_candidate], sample[ib]
+
+        # Verificacion final exhaustiva (post-escritura, no pre-escritura)
+        id_to_pos = {r["id_item"]: i for i, r in enumerate(sample)}
+        viols = violations_of(id_to_pos)
+        if viols:
+            detail = "; ".join(f"{a}/{b}=sep{s}" for a, b, s in viols)
+            raise ValueError(
+                f"_enforce_separation: {len(viols)} par(es) con sep<{sep_min} "
+                f"tras 50 pasos: {detail}"
+            )
         return id_to_pos
 
     _id_to_pos = _enforce_separation(main_sample, _all_sim_pairs, _SEP_MIN)
@@ -1547,6 +1604,7 @@ async def export_bloom_coding(
         },
         "total_mensajes_bruto": len(all_user_msgs) + e0_count,
         "total_mensajes_no_admin": len(all_user_msgs),
+        "nota_total_bruto": "total_mensajes_bruto = no_admin + E0 (cuentas admin). Puede diferir del count total de la tabla messages si hay mensajes sin conversation_id.",
         "exclusiones": exclusion_counts,
         "nota_exclusiones": (
             "E0: mensajes de cuentas con is_admin=True (pruebas del sistema, no consultas de estudiantes). "

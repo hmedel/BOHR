@@ -1,5 +1,5 @@
 {
-  "fecha_corte": "20260814_180948",
+  "fecha_corte": "20260814_184314",
   "semilla": 42,
   "nota_semilla": "La semilla permuta el ORDEN de los items, no los items mismos. Ambos codificadores reciben los mismos N items en distinto orden.",
   "sistema": {
@@ -9,6 +9,7 @@
   },
   "total_mensajes_bruto": 357,
   "total_mensajes_no_admin": 235,
+  "nota_total_bruto": "total_mensajes_bruto = no_admin + E0 (cuentas admin). Puede diferir del count total de la tabla messages si hay mensajes sin conversation_id.",
   "exclusiones": {
     "E0": 122,
     "E1": 15,
