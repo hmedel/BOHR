@@ -1,0 +1,153 @@
+{
+  "fecha_corte": "20260814_180948",
+  "semilla": 42,
+  "nota_semilla": "La semilla permuta el ORDEN de los items, no los items mismos. Ambos codificadores reciben los mismos N items en distinto orden.",
+  "sistema": {
+    "classifier_version": "1.1.0",
+    "model_version": "deepseek-chat-v3",
+    "prompt_version": "2.8"
+  },
+  "total_mensajes_bruto": 357,
+  "total_mensajes_no_admin": 235,
+  "exclusiones": {
+    "E0": 122,
+    "E1": 15,
+    "E2": 0,
+    "E3": 0,
+    "E4_same": 4,
+    "E4_cross": 33,
+    "E5": 12
+  },
+  "nota_exclusiones": "E0: mensajes de cuentas con is_admin=True (pruebas del sistema, no consultas de estudiantes). E4_same: duplicado exacto del mismo usuario. E4_cross: texto normalizado identico entre usuarios distintos (posible enunciado de tarea transcrito al chat — hallazgo a reportar). E5 se aplica sobre texto normalizado (NFD, sin acentos, sin puntuacion); ver historial de versiones en manual_codificacion v1.2, seccion A.2.",
+  "elegibles_total": 171,
+  "piloto_n": 25,
+  "piloto_ids": [
+    "M207",
+    "M267",
+    "M297",
+    "M287",
+    "M339",
+    "M123",
+    "M561",
+    "M607",
+    "M639",
+    "M211",
+    "M255",
+    "M497",
+    "M179",
+    "M373",
+    "M187",
+    "M423",
+    "M337",
+    "M295",
+    "M219",
+    "M275",
+    "M613",
+    "M467",
+    "M683",
+    "M107",
+    "M285"
+  ],
+  "nota_piloto": "25 items apartados con seed=0 antes de permutar la muestra principal. No forman parte de ninguna muestra posterior (manual E.1). Los dos codificadores los trabajan juntos para calibrar antes de codificar.",
+  "muestra_principal_n": 146,
+  "muestra_complementaria_n": 2,
+  "distribucion_classifier_version_muestra_principal": {
+    "legacy": 146
+  },
+  "nota_legacy": "classifier_version='legacy' indica items clasificados antes de P1.2 (sin metadatos de trazabilidad). Este estudio valida el clasificador pre-auditoria.",
+  "estratos_en_principal": {
+    "analizar": 2,
+    "crear": 0,
+    "evaluar": 0
+  },
+  "nota_complementaria": "Los items de estrato alto estan INCLUIDOS en la muestra principal. El archivo complementaria es una vista, no un conjunto disjunto. Con N pequeno, reportar como evidencia cualitativa, no estimacion de acuerdo.",
+  "pares_totales_sim095": 12,
+  "pares_consistencia": {
+    "M419": "P1a",
+    "M637": "P1b",
+    "M457": "P2a",
+    "M663": "P2b",
+    "M221": "P3a",
+    "M283": "P3b",
+    "M481": "P4a",
+    "M543": "P4b"
+  },
+  "pares_todos_sim095": [
+    {
+      "id1": "M419",
+      "id2": "M637",
+      "similitud": 0.993,
+      "designado": true
+    },
+    {
+      "id1": "M457",
+      "id2": "M663",
+      "similitud": 0.991,
+      "designado": true
+    },
+    {
+      "id1": "M221",
+      "id2": "M283",
+      "similitud": 0.984,
+      "designado": true
+    },
+    {
+      "id1": "M481",
+      "id2": "M543",
+      "similitud": 0.978,
+      "designado": true
+    },
+    {
+      "id1": "M429",
+      "id2": "M603",
+      "similitud": 0.977,
+      "designado": false
+    },
+    {
+      "id1": "M427",
+      "id2": "M601",
+      "similitud": 0.977,
+      "designado": false
+    },
+    {
+      "id1": "M425",
+      "id2": "M641",
+      "similitud": 0.971,
+      "designado": false
+    },
+    {
+      "id1": "M471",
+      "id2": "M631",
+      "similitud": 0.97,
+      "designado": false
+    },
+    {
+      "id1": "M503",
+      "id2": "M681",
+      "similitud": 0.966,
+      "designado": false
+    },
+    {
+      "id1": "M241",
+      "id2": "M377",
+      "similitud": 0.961,
+      "designado": false
+    },
+    {
+      "id1": "M463",
+      "id2": "M629",
+      "similitud": 0.958,
+      "designado": false
+    },
+    {
+      "id1": "M471",
+      "id2": "M673",
+      "similitud": 0.954,
+      "designado": false
+    }
+  ],
+  "nota_pares": "Se detectaron 12 pares con similitud>=0.95 en la muestra. Los primeros 4 no solapados se designan como pares de consistencia (P1a/P1b...P4a/P4b). TODOS los pares (designados y no designados) reciben separacion>=40 en el orden de la semilla solicitada — garantizado en cada llamada al endpoint. El codificador NO ve este campo ni la columna _consistency_pair en el CSV. Etiquetas P#a/P#b ancladas al id_item, no a la posicion.",
+  "e5_auditoria_n": 12,
+  "e5_auditoria_muestra_n": 12,
+  "nota_e5_auditoria": "E5 excluyó 12 items en total. Se revisan 12 al azar (seed=42) en auditoria_e5.csv. La auditoria la hace un docente que NO sea ninguno de los dos codificadores, antes de que estos codifiquen (ver el material antes del estudio condiciona). Ver historial de E5 en manual_codificacion v1.2, seccion A.2."
+}

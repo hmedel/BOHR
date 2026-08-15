@@ -1111,12 +1111,23 @@ async def export_bloom_coding(
         return h.hexdigest()[:12]
 
     # Recuperar todos los mensajes de usuario con sus metadatos
+    # E0 (criterio de elegibilidad de corpus): excluir cuentas administrativas (is_admin=True).
+    # Los mensajes de admin y coordinador son pruebas del sistema, no consultas de estudiantes.
+    # Este filtro se aplica ANTES de la cascada E1–E5 y se reporta por separado en stats.
     all_user_msgs = (
         db.query(Message)
         .join(Conversation)
-        .filter(Message.role == "user")
+        .join(User, User.id == Conversation.user_id)
+        .filter(Message.role == "user", User.is_admin == False)
         .order_by(Message.id)
         .all()
+    )
+    e0_count = (
+        db.query(Message)
+        .join(Conversation)
+        .join(User, User.id == Conversation.user_id)
+        .filter(Message.role == "user", User.is_admin == True)
+        .count()
     )
 
     # Patrones de exclusion (aplicados antes de mirar los datos)
@@ -1209,7 +1220,7 @@ async def export_bloom_coding(
         t = re.sub(r"\s+", " ", t).strip()
         return t
 
-    exclusion_counts = {"E1": 0, "E2": 0, "E3": 0, "E4_same": 0, "E4_cross": 0, "E5": 0}
+    exclusion_counts = {"E0": e0_count, "E1": 0, "E2": 0, "E3": 0, "E4_same": 0, "E4_cross": 0, "E5": 0}
     # E4_same: duplicado exacto del mismo usuario
     # E4_cross: texto normalizado ya visto en otro usuario (enunciado de tarea)
     seen_by_user: dict[int, set] = {}   # uid -> set(texto_original)
@@ -1534,9 +1545,11 @@ async def export_bloom_coding(
             "model_version": MODEL_VERSION,
             "prompt_version": PROMPT_VERSION,
         },
-        "total_mensajes_usuario": len(all_user_msgs),
+        "total_mensajes_bruto": len(all_user_msgs) + e0_count,
+        "total_mensajes_no_admin": len(all_user_msgs),
         "exclusiones": exclusion_counts,
         "nota_exclusiones": (
+            "E0: mensajes de cuentas con is_admin=True (pruebas del sistema, no consultas de estudiantes). "
             "E4_same: duplicado exacto del mismo usuario. "
             "E4_cross: texto normalizado identico entre usuarios distintos "
             "(posible enunciado de tarea transcrito al chat — hallazgo a reportar). "
