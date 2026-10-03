@@ -15,6 +15,8 @@ Versión 1.7 (2026-08-14): sep≥40 garantizado por verificación post-escritura
 
 *Cambios v1.6 (2026-08-14): criterio E0 agregado al protocolo y al código. Auditoría cruzando exclusiones por usuario reveló que 90 mensajes de la cuenta `admin` y 10 de la cuenta del coordinador sobrevivían la cascada y aparecían en los elegibles (37 % de la muestra anterior). E0 excluye todos los mensajes de cuentas con `is_admin=True` antes de la cascada E1–E5. Números definitivos del export v2.9.10: bruto=357, E0=122, no-admin=235, E1=15, E2=0, E3=0, E4_same=4, E4_cross=33, E5=12, elegibles=171, piloto=25, muestra principal=146.*
 
+*Cambios v1.8 (2026-10-02): E0 se amplía a cuentas docentes (`is_teacher=True`), un rol nuevo que usa el chat sin permisos de administrador. Al momento del cambio la única cuenta docente es nueva y no tiene mensajes, así que los números del export v2.9.10 no cambian. La cuenta `G01EProf01` (1 mensaje, incluido en la muestra principal de 146) se dejó como alumno para no alterar los archivos ya entregados a los codificadores.*
+
 *Cambios v1.7 (2026-08-14): (1) `_enforce_separation` reescrito con verificación exhaustiva post-escritura — el endpoint lanza excepción si queda algún par con sep<40, en lugar de entregar datos incorrectos silenciosamente. (2) Distribución de estudiantes añadida a A.4: 13 usuarios distintos; usuario más activo aporta 61/146 ítems (42 %). (3) Verificado: 0 violaciones en seed=42 y seed=99 sobre el nuevo export.*
 
 Este manual tiene dos usos independientes:
@@ -38,7 +40,7 @@ Se definen antes de mirar los datos y se aplican automáticamente. Se reporta el
 
 | Código | Criterio |
 |---|---|
-| E0 | Cuenta administrativa (`is_admin=True`): mensajes del administrador del sistema o del coordinador del estudio. Se aplica antes de la cascada; no es criterio de contenido sino de rol. |
+| E0 | Cuenta de staff: administrativa (`is_admin=True`: administrador del sistema o coordinador del estudio) o docente (`is_teacher=True`, desde v1.8). Se aplica antes de la cascada; no es criterio de contenido sino de rol. |
 | E1 | Menos de 15 caracteres tras eliminar espacios |
 | E2 | Saludo, agradecimiento o despedida sin contenido químico |
 | E3 | Petición de examen, cancelación, o interacción con el sistema |

@@ -40,7 +40,8 @@ def load_data():
     con = sqlite3.connect(DB_PATH)
 
     users = pd.read_sql_query("""
-        SELECT id, full_name, email, is_admin, created_at FROM users
+        -- is_admin aquí significa "staff": admin o docente, excluidos de las métricas de alumnos
+        SELECT id, full_name, email, (is_admin OR is_teacher) AS is_admin, created_at FROM users
     """, con)
 
     messages = pd.read_sql_query("""

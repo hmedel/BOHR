@@ -30,6 +30,9 @@ class User(Base):
     hashed_password = Column(String)
     full_name = Column(String, nullable=True)
     is_admin = Column(Boolean, default=False)
+    # Docente: usa el chat como cualquier usuario, sin permisos de admin; sus
+    # consultas quedan fuera del corpus del estudio de validez (criterio E0).
+    is_teacher = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")

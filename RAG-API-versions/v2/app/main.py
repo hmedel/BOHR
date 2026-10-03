@@ -8,7 +8,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from typing import Optional, List, AsyncGenerator
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, or_
 from datetime import timedelta, datetime
 import json
 import time
@@ -143,7 +143,8 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
-            "is_admin": user.is_admin
+            "is_admin": user.is_admin,
+            "is_teacher": user.is_teacher
         }
     }
 
@@ -154,7 +155,8 @@ async def get_me(current_user: User = Depends(get_current_user)):
         "username": current_user.username,
         "email": current_user.email,
         "full_name": current_user.full_name,
-        "is_admin": current_user.is_admin
+        "is_admin": current_user.is_admin,
+        "is_teacher": current_user.is_teacher
     }
 
 # ========== HELPER FUNCTIONS ==========
@@ -1161,14 +1163,15 @@ async def export_bloom_coding(
         return h.hexdigest()[:12]
 
     # Recuperar todos los mensajes de usuario con sus metadatos
-    # E0 (criterio de elegibilidad de corpus): excluir cuentas administrativas (is_admin=True).
+    # E0 (criterio de elegibilidad de corpus): excluir cuentas de staff, es decir
+    # administrativas (is_admin) y docentes (is_teacher).
     # Los mensajes de admin y coordinador son pruebas del sistema, no consultas de estudiantes.
     # Este filtro se aplica ANTES de la cascada E1–E5 y se reporta por separado en stats.
     all_user_msgs = (
         db.query(Message)
         .join(Conversation)
         .join(User, User.id == Conversation.user_id)
-        .filter(Message.role == "user", User.is_admin == False)
+        .filter(Message.role == "user", User.is_admin == False, User.is_teacher == False)
         .order_by(Message.id)
         .all()
     )
@@ -1176,7 +1179,7 @@ async def export_bloom_coding(
         db.query(Message)
         .join(Conversation)
         .join(User, User.id == Conversation.user_id)
-        .filter(Message.role == "user", User.is_admin == True)
+        .filter(Message.role == "user", or_(User.is_admin == True, User.is_teacher == True))
         .count()
     )
 
@@ -1657,7 +1660,7 @@ async def export_bloom_coding(
         "nota_total_bruto": "total_mensajes_bruto = no_admin + E0 (cuentas admin). Puede diferir del count total de la tabla messages si hay mensajes sin conversation_id.",
         "exclusiones": exclusion_counts,
         "nota_exclusiones": (
-            "E0: mensajes de cuentas con is_admin=True (pruebas del sistema, no consultas de estudiantes). "
+            "E0: mensajes de cuentas de staff, is_admin=True o is_teacher=True (pruebas del sistema y consultas docentes, no de estudiantes). "
             "E4_same: duplicado exacto del mismo usuario. "
             "E4_cross: texto normalizado identico entre usuarios distintos "
             "(posible enunciado de tarea transcrito al chat — hallazgo a reportar). "

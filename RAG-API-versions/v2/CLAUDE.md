@@ -173,7 +173,9 @@ query_multi_source_with_synthesis(query, sources_count=3, chunks_per_source=10,
 ## Database Schema (SQLite)
 
 8 tables:
-- **users**: id, username, email, hashed_password, full_name, is_admin, created_at
+- **users**: id, username, email, hashed_password, full_name, is_admin, is_teacher, created_at
+  (`is_teacher`: docente — uses the chat, no admin endpoints, excluded from the study corpus by E0;
+  added 2026-10-02 with `ALTER TABLE users ADD COLUMN is_teacher BOOLEAN NOT NULL DEFAULT 0`)
 - **conversations**: id, user_id, title, created_at, updated_at
 - **messages**: id, conversation_id, role, content, sources, sentiment_score/label, query_complexity, topics, bloom_level, solo_level, feedback, response_time
 - **query_logs**: id, user_id, query, sources_found, top_k_used, response_time, created_at
