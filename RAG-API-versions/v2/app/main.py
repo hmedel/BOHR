@@ -24,15 +24,34 @@ from .rag_engine import RAGEngine
 from .config import settings, CLASSIFIER_VERSION, MODEL_VERSION, PROMPT_VERSION
 from .database import get_db, User, Conversation, Message, QueryLog, StudentProgress, Exam, ExamResponse, ExamResult
 from .auth import (
-    get_password_hash, verify_password, create_access_token,
-    get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
+    get_password_hash, verify_password, is_legacy_hash, create_access_token,
+    get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES, SECRET_KEY, ALGORITHM
 )
 from .analytics_engine import AnalyticsEngine
 from .qualitative_evaluator import QualitativeEvaluator
-from .exam_engine import ExamEngine
+from .exam_engine import ExamEngine, is_exam_request, is_exam_confirmation
 from . import cache as rag_cache
+from starlette.concurrency import run_in_threadpool
+from jose import JWTError, jwt as jose_jwt
+import httpx
 
 app = FastAPI(title="Asistente de Estructura de la Materia", version="2.8")
+
+def _rate_key(request: Request) -> str:
+    """Clave de rate limit para endpoints autenticados: el usuario del token.
+
+    Por IP, un salón completo detrás del mismo NAT compartiría el límite.
+    Sin token válido se cae a la IP (el endpoint responderá 401 de todos modos).
+    """
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        try:
+            sub = jose_jwt.decode(auth[7:], SECRET_KEY, algorithms=[ALGORITHM]).get("sub")
+            if sub:
+                return f"user:{sub}"
+        except JWTError:
+            pass
+    return get_remote_address(request)
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
@@ -40,7 +59,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://chat.bohrbot.space", "http://localhost:9000", "http://132.248.102.133:9000"],
+    # bohrbot.space se mantiene mientras dure la transición a pauling.cloud
+    allow_origins=["https://chat.pauling.cloud", "https://chat.bohrbot.space",
+                   "http://localhost:9000", "http://132.248.102.133:9000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -78,6 +99,8 @@ class FeedbackRequest(BaseModel):
 @app.post("/register")
 @limiter.limit("10/minute")
 async def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
+    if not settings.ALLOW_REGISTRATION:
+        raise HTTPException(status_code=403, detail="El registro está cerrado. Solicita tu cuenta a tu profesor.")
     if db.query(User).filter(User.username == user.username).first():
         raise HTTPException(status_code=400, detail="Usuario ya existe")
     if db.query(User).filter(User.email == user.email).first():
@@ -96,12 +119,18 @@ async def register(request: Request, user: UserCreate, db: Session = Depends(get
     return {"message": "Usuario creado", "username": new_user.username}
 
 @app.post("/token", response_model=Token)
-@limiter.limit("20/minute")
+@limiter.limit("60/minute")  # por IP: un grupo entero puede entrar a la vez desde el mismo NAT
 async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
-    
+
+    # Migrar hash legacy (SHA-256 sin salt) a bcrypt ahora que conocemos la contraseña
+    if is_legacy_hash(user.hashed_password):
+        user.hashed_password = get_password_hash(form_data.password)
+        db.commit()
+        logger.info("Hash de contraseña migrado a bcrypt para el usuario id=%s", user.id)
+
     access_token = create_access_token(
         data={"sub": user.username},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -129,37 +158,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
     }
 
 # ========== HELPER FUNCTIONS ==========
-def is_exam_request(query: str) -> bool:
-    """Detectar si el usuario solicita un examen"""
-    query_lower = query.lower()
-    
-    # Patrones de solicitud de examen
-    exam_patterns = [
-        r'\bterminé\b',
-        r'\btermine\b',
-        r'\bexamen\b',
-        r'\bevalúame\b',
-        r'\bevaluame\b',
-        r'\bquiero un examen\b',
-        r'\bquiero otro examen\b',
-        r'\botro examen\b',
-        r'\bnuevo examen\b',
-        r'\bmás preguntas\b',
-        r'\bmas preguntas\b',
-        r'\bhacer un examen\b',
-        r'\btomar un examen\b',
-        r'\bprueba\b',
-        r'\bevaluación\b',
-        r'\bevaluacion\b'
-    ]
-    
-    return any(re.search(pattern, query_lower) for pattern in exam_patterns)
-
-def is_exam_confirmation(query: str) -> bool:
-    """Detectar confirmación para iniciar examen"""
-    query_lower = query.lower()
-    return (('sí' in query_lower or 'si' in query_lower) and 
-            ('comenzar' in query_lower or 'empezar' in query_lower or 'iniciar' in query_lower))
+# is_exam_request / is_exam_confirmation viven en exam_engine.py
 
 def get_active_exam(user_id: int, db: Session) -> Optional[Exam]:
     """Obtener examen activo (status=active y sin completar) del usuario"""
@@ -315,31 +314,40 @@ def should_offer_exam(conv_messages: list) -> bool:
 async def health():
     return {"status": "healthy", "version": "2.8", "cache": rag_cache.get_stats()}
 
-@app.post("/query")
-@limiter.limit("30/minute")
-async def query(
-    request: Request,
-    body: QueryRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    start_time = time.time()
-    
-    try:
-        query_text = body.query.strip()
+def _handle_exam_flow(body: QueryRequest, current_user: User, db: Session) -> Optional[dict]:
+    """
+    Flujos de estado del examen (solicitud, cancelación, confirmación, respuesta).
+    Devuelve la respuesta ya armada, o None si el mensaje es una consulta normal.
+
+    Es síncrona (BD + llamadas al LLM): los endpoints la corren con
+    run_in_threadpool para no bloquear el event loop.
+    """
+    query_text = body.query.strip()
+
+    # "Cancelar examen actual" contiene "examen": se evalúa antes que la solicitud,
+    # si no la sección 1 lo intercepta y la cancelación por chat nunca se alcanza.
+    is_cancel = "cancelar" in query_text.lower() and "examen" in query_text.lower()
+
+    # Conversación actual (la usan la verificación de requisitos y el inicio del examen)
+    conv = None
+    if body.conversation_id:
+        conv = db.query(Conversation).filter(
+            Conversation.id == body.conversation_id,
+            Conversation.user_id == current_user.id
+        ).first()
+
+    # ===== 1. DETECTAR SOLICITUD DE EXAMEN =====
+    if is_exam_request(query_text) and not is_cancel:
+        # Verificar si ya tiene un examen activo
+        active_exam = get_active_exam(current_user.id, db)
         
-        # ===== 1. DETECTAR SOLICITUD DE EXAMEN =====
-        if is_exam_request(query_text):
-            # Verificar si ya tiene un examen activo
-            active_exam = get_active_exam(current_user.id, db)
+        if active_exam:
+            exam_data = json.loads(active_exam.exam_data)
+            current_q = exam_data.get("current_question", 1)
+            total_q = exam_data.get("total_questions", 3)
             
-            if active_exam:
-                exam_data = json.loads(active_exam.exam_data)
-                current_q = exam_data.get("current_question", 1)
-                total_q = exam_data.get("total_questions", 3)
-                
-                return {
-                    "answer": f"""**Ya tienes un examen en progreso**
+            return {
+                "answer": f"""**Ya tienes un examen en progreso**
 
 Estás en la pregunta {current_q} de {total_q}.
 
@@ -347,37 +355,30 @@ Estás en la pregunta {current_q} de {total_q}.
 1. Continúa respondiendo la pregunta actual
 2. Si quieres cancelar este examen y empezar uno nuevo, escribe: **"Cancelar examen actual"**
 """,
-                    "sources": []
-                }
-            
-            # Verificar si está listo para un examen
-            conv = None
-            if body.conversation_id:
-                conv = db.query(Conversation).filter(
-                    Conversation.id == body.conversation_id,
-                    Conversation.user_id == current_user.id
-                ).first()
-            
-            if conv:
-                exam_check = exam_engine.should_offer_exam(conv.messages)
-            else:
-                all_messages = db.query(Message).join(Conversation).filter(
-                    Conversation.user_id == current_user.id
-                ).all()
-                exam_check = exam_engine.should_offer_exam(all_messages)
-            
-            if not exam_check["should_offer"]:
-                return {
-                    "answer": f"""**Aun no estas listo para un nuevo examen**
+                "sources": []
+            }
+        
+        # Verificar si está listo para un examen
+        if conv:
+            exam_check = exam_engine.should_offer_exam(conv.messages)
+        else:
+            all_messages = db.query(Message).join(Conversation).filter(
+                Conversation.user_id == current_user.id
+            ).all()
+            exam_check = exam_engine.should_offer_exam(all_messages)
+        
+        if not exam_check["should_offer"]:
+            return {
+                "answer": f"""**Aun no estas listo para un nuevo examen**
 
 {exam_check['reason']}
 
 Continúa estudiando y luego podrás tomar un examen formativo.""",
-                    "sources": []
-                }
-            else:
-                return {
-                    "answer": f"""**Estas listo para un examen formativo**
+                "sources": []
+            }
+        else:
+            return {
+                "answer": f"""**Estas listo para un examen formativo**
 
 **Resumen:**
 - Consultas realizadas: {exam_check['queries_count']}
@@ -390,239 +391,248 @@ Continúa estudiando y luego podrás tomar un examen formativo.""",
 - Evaluación final al terminar
 
 **¿Deseas comenzar?** Responde **"Sí, comenzar"** para iniciar.""",
-                    "sources": [],
-                    "exam_offer": True
-                }
-        
-        # ===== 2. CANCELAR EXAMEN ACTUAL =====
-        if "cancelar" in query_text.lower() and "examen" in query_text.lower():
-            active_exam = get_active_exam(current_user.id, db)
-            if active_exam:
-                # Marcar como cancelado
-                exam_data = json.loads(active_exam.exam_data)
-                exam_data["cancelled"] = True
-                active_exam.exam_data = json.dumps(exam_data)
-                db.commit()
-                
-                return {
-                    "answer": """**Examen cancelado**
+                "sources": [],
+                "exam_offer": True
+            }
+    
+    # ===== 2. CANCELAR EXAMEN ACTUAL =====
+    if is_cancel:
+        active_exam = get_active_exam(current_user.id, db)
+        if active_exam:
+            # Marcar como cancelado. El status es lo que consulta get_active_exam:
+            # sin cambiarlo, el examen seguía activo tras "cancelarlo".
+            exam_data = json.loads(active_exam.exam_data)
+            exam_data["cancelled"] = True
+            active_exam.exam_data = json.dumps(exam_data)
+            active_exam.status = "cancelled"
+            db.commit()
+
+            return {
+                "answer": """**Examen cancelado**
 
 Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un examen"**""",
-                    "sources": []
-                }
+                "sources": []
+            }
+        return {
+            "answer": "No tienes ningún examen en progreso. Escribe **\"Quiero un examen\"** cuando quieras iniciar uno.",
+            "sources": []
+        }
+
+    # ===== 3. CONFIRMAR E INICIAR EXAMEN =====
+    if is_exam_confirmation(query_text):
+        # Verificar que no haya examen activo
+        active_exam = get_active_exam(current_user.id, db)
+        if active_exam:
+            return {
+                "answer": "Ya tienes un examen en progreso. Termínalo primero o cancélalo.",
+                "sources": []
+            }
+
+        # Necesitamos conv para extraer los temas de la sesión
+        if not conv:
+            return {
+                "answer": "No puedo iniciar el examen sin una conversación activa. Haz al menos una consulta primero.",
+                "sources": []
+            }
+
+        # Crear nuevo examen — temas de la conversación actual (esta sesión)
+        session_messages = [m for m in conv.messages if m.role == "user"]
+        topics = set()
+        for msg in session_messages:
+            if msg.topics:
+                try:
+                    topics.update(json.loads(msg.topics))
+                except Exception:
+                    logger.debug("topics JSON inválido en mensaje %s", msg.id)
+
+        # Historial de mensajes de esta sesión para generar preguntas contextuales
+        all_messages = session_messages
         
-        # ===== 3. CONFIRMAR E INICIAR EXAMEN =====
-        if is_exam_confirmation(query_text):
-            # Verificar que no haya examen activo
-            active_exam = get_active_exam(current_user.id, db)
-            if active_exam:
-                return {
-                    "answer": "Ya tienes un examen en progreso. Termínalo primero o cancélalo.",
-                    "sources": []
-                }
+        # Número fijo de preguntas: siempre 5
+        total_questions = 5
 
-            # Necesitamos conv para extraer los temas de la sesión
-            if not conv:
-                return {
-                    "answer": "No puedo iniciar el examen sin una conversación activa. Haz al menos una consulta primero.",
-                    "sources": []
-                }
+        # Calcular perfil de dificultad basado en exámenes anteriores (batch, sin N+1)
+        past_results = db.query(ExamResult).filter(ExamResult.user_id == current_user.id).all()
+        past_exams_data = []
+        if past_results:
+            exam_ids = [r.exam_id for r in past_results]
+            exams_map = {e.id: e for e in db.query(Exam).filter(Exam.id.in_(exam_ids)).all()}
+            responses_map: dict = {}
+            for resp in db.query(ExamResponse).filter(ExamResponse.exam_id.in_(exam_ids)).all():
+                responses_map.setdefault(resp.exam_id, []).append(resp)
+            for res in past_results:
+                exam_ref = exams_map.get(res.exam_id)
+                if exam_ref:
+                    correct = sum(
+                        1 for r in responses_map.get(exam_ref.id, [])
+                        if json.loads(r.evaluation_data or "{}").get("is_correct", False)
+                    )
+                    past_exams_data.append({"correct": correct, "total": exam_ref.total_questions})
 
-            # Crear nuevo examen — temas de la conversación actual (esta sesión)
-            session_messages = [m for m in conv.messages if m.role == "user"]
-            topics = set()
-            for msg in session_messages:
-                if msg.topics:
-                    try:
-                        topics.update(json.loads(msg.topics))
-                    except Exception:
-                        logger.debug("topics JSON inválido en mensaje %s", msg.id)
+        difficulty_profile = exam_engine.get_difficulty_profile(past_exams_data)
 
-            # Historial de mensajes de esta sesión para generar preguntas contextuales
-            all_messages = session_messages
-            
-            # Número fijo de preguntas: siempre 5
-            total_questions = 5
+        # Crear examen
+        new_exam = Exam(
+            user_id=current_user.id,
+            title=f"Examen Formativo - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            exam_data=json.dumps({
+                "total_questions": total_questions,
+                "current_question": 1,
+                "topics": list(topics),
+                "started_at": datetime.now().isoformat(),
+                "difficulty_profile": difficulty_profile,
+            }),
+            topics_covered=json.dumps(list(topics)),
+            total_questions=total_questions
+        )
+        db.add(new_exam)
+        db.commit()
+        db.refresh(new_exam)
 
-            # Calcular perfil de dificultad basado en exámenes anteriores (batch, sin N+1)
-            past_results = db.query(ExamResult).filter(ExamResult.user_id == current_user.id).all()
-            past_exams_data = []
-            if past_results:
-                exam_ids = [r.exam_id for r in past_results]
-                exams_map = {e.id: e for e in db.query(Exam).filter(Exam.id.in_(exam_ids)).all()}
-                responses_map: dict = {}
-                for resp in db.query(ExamResponse).filter(ExamResponse.exam_id.in_(exam_ids)).all():
-                    responses_map.setdefault(resp.exam_id, []).append(resp)
-                for res in past_results:
-                    exam_ref = exams_map.get(res.exam_id)
-                    if exam_ref:
-                        correct = sum(
-                            1 for r in responses_map.get(exam_ref.id, [])
-                            if json.loads(r.evaluation_data or "{}").get("is_correct", False)
-                        )
-                        past_exams_data.append({"correct": correct, "total": exam_ref.total_questions})
+        # Generar primera pregunta fundamentada en el corpus
+        question = generate_exam_question(
+            conversation_history=all_messages,
+            topics=list(topics),
+            question_number=1,
+            total_questions=total_questions,
+            previous_levels=[],
+            difficulty_profile=difficulty_profile,
+        )
 
-            difficulty_profile = exam_engine.get_difficulty_profile(past_exams_data)
-
-            # Crear examen
-            new_exam = Exam(
-                user_id=current_user.id,
-                title=f"Examen Formativo - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-                exam_data=json.dumps({
-                    "total_questions": total_questions,
-                    "current_question": 1,
-                    "topics": list(topics),
-                    "started_at": datetime.now().isoformat(),
-                    "difficulty_profile": difficulty_profile,
-                }),
-                topics_covered=json.dumps(list(topics)),
-                total_questions=total_questions
-            )
-            db.add(new_exam)
+        if not question or question.get("error"):
+            # No dejar un examen activo sin pregunta: bloquearía al estudiante
+            new_exam.status = "cancelled"
             db.commit()
-            db.refresh(new_exam)
-
-            # Generar primera pregunta fundamentada en el corpus
-            question = generate_exam_question(
-                conversation_history=all_messages,
-                topics=list(topics),
-                question_number=1,
-                total_questions=total_questions,
-                previous_levels=[],
-                difficulty_profile=difficulty_profile,
-            )
-
-            if not question or question.get("error"):
-                raise HTTPException(status_code=500, detail="Error generando pregunta")
-            
-            # Guardar pregunta
-            exam_data = json.loads(new_exam.exam_data)
-            exam_data["questions"] = [question]
-            exam_data["question_1"] = question
-            new_exam.exam_data = json.dumps(exam_data)
-            db.commit()
-            
-            # Formatear pregunta
-            question_display = f"""# Pregunta 1 de {total_questions}
+            raise HTTPException(status_code=500, detail="Error generando pregunta")
+        
+        # Guardar pregunta
+        exam_data = json.loads(new_exam.exam_data)
+        exam_data["questions"] = [question]
+        exam_data["question_1"] = question
+        new_exam.exam_data = json.dumps(exam_data)
+        db.commit()
+        
+        # Formatear pregunta
+        question_display = f"""# Pregunta 1 de {total_questions}
 
 **Nivel:** {question['nivel_bloom'].title()}
 
 {question['enunciado']}
 
 """
-            
-            if question.get("tipo") == "opcion_multiple" and question.get("opciones"):
-                for opcion in question['opciones']:
-                    question_display += f"{opcion}\n"
-                question_display += "\n**Responde con la letra (A, B, C o D) y justifica brevemente tu elección.**"
-            elif question.get("tipo") == "desarrollo_corto":
-                instruccion = question.get("instruccion_estudiante", "Redacta tu respuesta en 3 a 6 oraciones completas.")
-                question_display += f"\n_{instruccion}_"
-            else:
-                question_display += "\n**Escribe tu respuesta.**"
-
-            return {
-                "answer": question_display,
-                "sources": [],
-                "exam_in_progress": True,
-                "exam_id": new_exam.id,
-                "question_number": 1,
-                "total_questions": total_questions
-            }
         
-        # ===== 4. DETECTAR RESPUESTA A EXAMEN EN PROGRESO =====
-        active_exam = get_active_exam(current_user.id, db)
-        
-        if active_exam:
-            exam_data = json.loads(active_exam.exam_data)
-            current_q = exam_data.get("current_question", 1)
-            total_q = exam_data.get("total_questions", 3)
-            
-            # Esta query es una respuesta a la pregunta actual
-            question_key = f"question_{current_q}"
-            current_question = exam_data.get(question_key)
-            
-            if not current_question and "questions" in exam_data:
-                questions_list = exam_data.get("questions", [])
-                if current_q <= len(questions_list):
-                    current_question = questions_list[current_q - 1]
-            
-            if current_question:
-                # Evaluar respuesta
-                evaluation = exam_engine.evaluate_answer(
-                    current_question,
-                    query_text
-                )
-                
-                # Análisis de sentimiento de la respuesta del estudiante
-                sentiment = analytics_engine.analyze_sentiment(query_text)
-                
-                # Guardar respuesta.
-                # solo_level se deja en NULL: evaluation["nivel"] contiene
-                # "excelente"/"insuficiente" (etiqueta de correccion), no un
-                # nivel SOLO (preestructural…abstracto_extendido). Escribir esa
-                # etiqueta en solo_level contamina el historico con valores
-                # que no son SOLO (ver P0.2 del documento de auditoria).
-                # sentiment_score/label se conservan en la columna pero no se
-                # usan en decisiones pedagogicas: TextBlob es monolingue ingles
-                # y produce ceros en texto en espanol (ver P0.4).
-                exam_response = ExamResponse(
-                    exam_id=active_exam.id,
-                    user_id=current_user.id,
-                    question_number=current_q,
-                    student_answer=query_text,
-                    bloom_level=current_question.get("nivel_bloom", ""),
-                    solo_level=None,
-                    evaluation_data=json.dumps(evaluation),
-                    sentiment_score=sentiment["score"],
-                    sentiment_label=sentiment["label"],
-                )
-                db.add(exam_response)
-                db.commit()
-                
-                # Mostrar feedback
-                feedback_display = evaluation["feedback"]
-                
-                # ¿Hay más preguntas?
-                if current_q < total_q:
-                    # Generar siguiente pregunta
-                    next_q = current_q + 1
-                    
-                    # Niveles previos
-                    previous_levels = []
-                    for i in range(1, current_q + 1):
-                        q_key = f"question_{i}"
-                        if q_key in exam_data:
-                            previous_levels.append(exam_data[q_key].get("nivel_bloom", ""))
-                    
-                    # Generar pregunta
-                    all_messages = db.query(Message).join(Conversation).filter(
-                        Conversation.user_id == current_user.id,
-                        Message.role == "user"
-                    ).all()
-                    
-                    next_question = generate_exam_question(
-                        conversation_history=all_messages,
-                        topics=exam_data.get("topics", []),
-                        question_number=next_q,
-                        total_questions=total_q,
-                        previous_levels=previous_levels,
-                        difficulty_profile=exam_data.get("difficulty_profile"),
-                    )
+        if question.get("tipo") == "opcion_multiple" and question.get("opciones"):
+            for opcion in question['opciones']:
+                question_display += f"{opcion}\n"
+            question_display += "\n**Responde con la letra (A, B, C o D) y justifica brevemente tu elección.**"
+        elif question.get("tipo") == "desarrollo_corto":
+            instruccion = question.get("instruccion_estudiante", "Redacta tu respuesta en 3 a 6 oraciones completas.")
+            question_display += f"\n_{instruccion}_"
+        else:
+            question_display += "\n**Escribe tu respuesta.**"
 
-                    if next_question and not next_question.get("error"):
-                        # Guardar siguiente pregunta
-                        exam_data[f"question_{next_q}"] = next_question
-                        exam_data["current_question"] = next_q
-                        
-                        if "questions" in exam_data:
-                            exam_data["questions"].append(next_question)
-                        
-                        active_exam.exam_data = json.dumps(exam_data)
-                        db.commit()
-                        
-                        # Agregar siguiente pregunta al feedback
-                        feedback_display += f"""
+        return {
+            "answer": question_display,
+            "sources": [],
+            "exam_in_progress": True,
+            "exam_id": new_exam.id,
+            "question_number": 1,
+            "total_questions": total_questions
+        }
+    
+    # ===== 4. DETECTAR RESPUESTA A EXAMEN EN PROGRESO =====
+    active_exam = get_active_exam(current_user.id, db)
+    
+    if active_exam:
+        exam_data = json.loads(active_exam.exam_data)
+        current_q = exam_data.get("current_question", 1)
+        total_q = exam_data.get("total_questions", 3)
+        
+        # Esta query es una respuesta a la pregunta actual
+        question_key = f"question_{current_q}"
+        current_question = exam_data.get(question_key)
+        
+        if not current_question and "questions" in exam_data:
+            questions_list = exam_data.get("questions", [])
+            if current_q <= len(questions_list):
+                current_question = questions_list[current_q - 1]
+        
+        if current_question:
+            # Evaluar respuesta
+            evaluation = exam_engine.evaluate_answer(
+                current_question,
+                query_text
+            )
+            
+            # Análisis de sentimiento de la respuesta del estudiante
+            sentiment = analytics_engine.analyze_sentiment(query_text)
+            
+            # Guardar respuesta.
+            # solo_level se deja en NULL: evaluation["nivel"] contiene
+            # "excelente"/"insuficiente" (etiqueta de correccion), no un
+            # nivel SOLO (preestructural…abstracto_extendido). Escribir esa
+            # etiqueta en solo_level contamina el historico con valores
+            # que no son SOLO (ver P0.2 del documento de auditoria).
+            # sentiment_score/label se conservan en la columna pero no se
+            # usan en decisiones pedagogicas: TextBlob es monolingue ingles
+            # y produce ceros en texto en espanol (ver P0.4).
+            exam_response = ExamResponse(
+                exam_id=active_exam.id,
+                user_id=current_user.id,
+                question_number=current_q,
+                student_answer=query_text,
+                bloom_level=current_question.get("nivel_bloom", ""),
+                solo_level=None,
+                evaluation_data=json.dumps(evaluation),
+                sentiment_score=sentiment["score"],
+                sentiment_label=sentiment["label"],
+            )
+            db.add(exam_response)
+            db.commit()
+            
+            # Mostrar feedback
+            feedback_display = evaluation["feedback"]
+            
+            # ¿Hay más preguntas?
+            if current_q < total_q:
+                # Generar siguiente pregunta
+                next_q = current_q + 1
+                
+                # Niveles previos
+                previous_levels = []
+                for i in range(1, current_q + 1):
+                    q_key = f"question_{i}"
+                    if q_key in exam_data:
+                        previous_levels.append(exam_data[q_key].get("nivel_bloom", ""))
+                
+                # Generar pregunta
+                all_messages = db.query(Message).join(Conversation).filter(
+                    Conversation.user_id == current_user.id,
+                    Message.role == "user"
+                ).all()
+                
+                next_question = generate_exam_question(
+                    conversation_history=all_messages,
+                    topics=exam_data.get("topics", []),
+                    question_number=next_q,
+                    total_questions=total_q,
+                    previous_levels=previous_levels,
+                    difficulty_profile=exam_data.get("difficulty_profile"),
+                )
+
+                if next_question and not next_question.get("error"):
+                    # Guardar siguiente pregunta
+                    exam_data[f"question_{next_q}"] = next_question
+                    exam_data["current_question"] = next_q
+                    
+                    if "questions" in exam_data:
+                        exam_data["questions"].append(next_question)
+                    
+                    active_exam.exam_data = json.dumps(exam_data)
+                    db.commit()
+                    
+                    # Agregar siguiente pregunta al feedback
+                    feedback_display += f"""
 
 ---
 
@@ -633,158 +643,237 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
 {next_question['enunciado']}
 
 """
-                        if next_question.get("tipo") == "opcion_multiple" and next_question.get("opciones"):
-                            for opcion in next_question['opciones']:
-                                feedback_display += f"{opcion}\n"
-                            feedback_display += "\n**Responde con la letra y justifica brevemente.**"
-                        elif next_question.get("tipo") == "desarrollo_corto":
-                            instruccion = next_question.get("instruccion_estudiante", "Redacta tu respuesta en 3 a 6 oraciones completas.")
-                            feedback_display += f"\n_{instruccion}_"
+                    if next_question.get("tipo") == "opcion_multiple" and next_question.get("opciones"):
+                        for opcion in next_question['opciones']:
+                            feedback_display += f"{opcion}\n"
+                        feedback_display += "\n**Responde con la letra y justifica brevemente.**"
+                    elif next_question.get("tipo") == "desarrollo_corto":
+                        instruccion = next_question.get("instruccion_estudiante", "Redacta tu respuesta en 3 a 6 oraciones completas.")
+                        feedback_display += f"\n_{instruccion}_"
+            
+            else:
+                # Era la última pregunta - generar resumen
+                all_responses = db.query(ExamResponse).filter(
+                    ExamResponse.exam_id == active_exam.id
+                ).all()
                 
-                else:
-                    # Era la última pregunta - generar resumen
-                    all_responses = db.query(ExamResponse).filter(
-                        ExamResponse.exam_id == active_exam.id
-                    ).all()
+                questions_and_answers = []
+                for resp in all_responses:
+                    q_key = f"question_{resp.question_number}"
+                    question = exam_data.get(q_key, {})
+                    eval_data = json.loads(resp.evaluation_data) if resp.evaluation_data else {}
                     
-                    questions_and_answers = []
-                    for resp in all_responses:
-                        q_key = f"question_{resp.question_number}"
-                        question = exam_data.get(q_key, {})
-                        eval_data = json.loads(resp.evaluation_data) if resp.evaluation_data else {}
-                        
-                        questions_and_answers.append({
-                            "question": question,
-                            "answer": resp.student_answer,
-                            "evaluation": eval_data
-                        })
-                    
-                    summary = exam_engine.generate_final_summary(
-                        questions_and_answers,
-                        exam_data.get("topics", [])
-                    )
-                    
-                    # Guardar resultado final.
-                    # Las preguntas de desarrollo (is_correct=None) no se
-                    # cuentan en correct_count; solo opcion_multiple.
-                    mc_qas_final = [
-                        qa for qa in questions_and_answers
-                        if qa.get("question", {}).get("tipo") != "desarrollo_corto"
-                    ]
-                    desarrollo_qas = [
-                        qa for qa in questions_and_answers
-                        if qa.get("question", {}).get("tipo") == "desarrollo_corto"
-                    ]
-                    correct_count = sum(1 for qa in mc_qas_final if qa.get("evaluation", {}).get("is_correct", False))
-                    total_mc_final = len(mc_qas_final)
-
-                    # Calcular distribuciones reales
-                    bloom_dist = {}
-                    solo_dist = {}
-                    for qa in questions_and_answers:
-                        bl = qa.get("question", {}).get("nivel_bloom", "")
-                        sl = qa.get("evaluation", {}).get("nivel", "")
-                        if bl: bloom_dist[bl] = bloom_dist.get(bl, 0) + 1
-                        # solo_dist excluye "pendiente_revision" (no es nivel SOLO)
-                        if sl and sl not in ("pendiente_revision", ""):
-                            solo_dist[sl] = solo_dist.get(sl, 0) + 1
-
-                    # solo_dist ahora siempre estara vacio porque solo_level
-                    # se guarda como NULL (ver P0.2). El fallback que inferida
-                    # nivel SOLO desde porcentaje de aciertos se elimina: es
-                    # una invencion, no una medicion. predominant_solo_level
-                    # queda en NULL hasta que haya evaluacion SOLO real.
-                    predominant_solo = None
-                    strengths = [f"Respondió correctamente {correct_count} de {total_mc_final} preguntas de opción múltiple"]
-                    if desarrollo_qas:
-                        strengths.append("Completó una pregunta de desarrollo (pendiente de revisión docente)")
-                    if bloom_dist:
-                        top_bloom = max(bloom_dist, key=bloom_dist.get)
-                        strengths.append(f"Mayor desempeño en nivel Bloom: {top_bloom}")
-
-                    exam_result = ExamResult(
-                        exam_id=active_exam.id,
-                        user_id=current_user.id,
-                        # predominant_solo_level es NULL: no hay evaluacion SOLO real todavia.
-                        predominant_solo_level=predominant_solo,
-                        overall_description=(
-                            f"Completo {total_q} preguntas: {correct_count}/{total_mc_final} opcion multiple"
-                            + (f", 1 desarrollo" if desarrollo_qas else "")
-                        ),
-                        strengths=json.dumps(strengths),
-                        improvement_plan=json.dumps({"plan": "Revisar los temas con menor desempeno"}),
-                        bloom_distribution=json.dumps(bloom_dist),
-                        # solo_distribution: los valores en solo_dist son etiquetas de correccion,
-                        # no niveles SOLO. Se guarda el dict real para auditoria pero se documenta
-                        # que no debe interpretarse como distribucion SOLO.
-                        solo_distribution=json.dumps({"_nota": "valores son outcome_label, no niveles SOLO", **solo_dist}),
-                    )
-                    db.add(exam_result)
-                    # Marcar examen como completado
-                    active_exam.status = "completed"
-                    db.commit()
-
-                    feedback_display += f"\n\n---\n\n{summary}"
+                    questions_and_answers.append({
+                        "question": question,
+                        "answer": resp.student_answer,
+                        "evaluation": eval_data
+                    })
                 
-                return {
-                    "answer": feedback_display,
-                    "sources": [],
-                    "exam_in_progress": (current_q < total_q),
-                    "question_number": current_q,
-                    "total_questions": total_q
-                }
-        
-        # ===== 5. FLUJO NORMAL DE RAG (Multi-Source) =====
-        
-        # Obtener o crear conversación
-        if body.conversation_id:
-            conv = db.query(Conversation).filter(
-                Conversation.id == body.conversation_id,
-                Conversation.user_id == current_user.id
-            ).first()
-            if not conv:
-                raise HTTPException(status_code=404, detail="Conversación no encontrada")
-        else:
-            conv = Conversation(user_id=current_user.id, title=query_text[:50])
-            db.add(conv)
-            db.commit()
-            db.refresh(conv)
-        
-        # Análisis de la consulta
-        sentiment = analytics_engine.analyze_sentiment(query_text)
-        topics = analytics_engine.detect_topics(query_text)
-        complexity = analytics_engine.assess_complexity(query_text)
-        bloom_level, bloom_desc = qualitative_evaluator.classify_bloom_level(query_text)
+                summary = exam_engine.generate_final_summary(
+                    questions_and_answers,
+                    exam_data.get("topics", [])
+                )
+                
+                # Guardar resultado final.
+                # Las preguntas de desarrollo (is_correct=None) no se
+                # cuentan en correct_count; solo opcion_multiple.
+                mc_qas_final = [
+                    qa for qa in questions_and_answers
+                    if qa.get("question", {}).get("tipo") != "desarrollo_corto"
+                ]
+                desarrollo_qas = [
+                    qa for qa in questions_and_answers
+                    if qa.get("question", {}).get("tipo") == "desarrollo_corto"
+                ]
+                correct_count = sum(1 for qa in mc_qas_final if qa.get("evaluation", {}).get("is_correct", False))
+                total_mc_final = len(mc_qas_final)
 
-        # Metadatos de trazabilidad (P1.2): versión del clasificador, del modelo
-        # y del prompt en el momento de la clasificación. Permiten reproducir o
-        # auditar cualquier clasificación Bloom en el contexto del estudio de validez.
-        _classifier_meta = {
-            "classifier_version": CLASSIFIER_VERSION,
-            "model_version": MODEL_VERSION,
-            "prompt_version": PROMPT_VERSION,
-            "classified_at": datetime.utcnow().isoformat() + "Z",
-        }
+                # Calcular distribuciones reales
+                bloom_dist = {}
+                solo_dist = {}
+                for qa in questions_and_answers:
+                    bl = qa.get("question", {}).get("nivel_bloom", "")
+                    sl = qa.get("evaluation", {}).get("nivel", "")
+                    if bl: bloom_dist[bl] = bloom_dist.get(bl, 0) + 1
+                    # solo_dist excluye "pendiente_revision" (no es nivel SOLO)
+                    if sl and sl not in ("pendiente_revision", ""):
+                        solo_dist[sl] = solo_dist.get(sl, 0) + 1
 
-        user_msg = Message(
-            conversation_id=conv.id,
-            role="user",
-            content=query_text,
-            sentiment_score=sentiment["score"],
-            sentiment_label=sentiment["label"],
-            query_complexity=complexity,
-            topics=json.dumps(topics),
-            bloom_level=bloom_level,
-            classifier_meta=_classifier_meta,
+                # solo_dist ahora siempre estara vacio porque solo_level
+                # se guarda como NULL (ver P0.2). El fallback que inferida
+                # nivel SOLO desde porcentaje de aciertos se elimina: es
+                # una invencion, no una medicion. predominant_solo_level
+                # queda en NULL hasta que haya evaluacion SOLO real.
+                predominant_solo = None
+                strengths = [f"Respondió correctamente {correct_count} de {total_mc_final} preguntas de opción múltiple"]
+                if desarrollo_qas:
+                    strengths.append("Completó una pregunta de desarrollo (pendiente de revisión docente)")
+                if bloom_dist:
+                    top_bloom = max(bloom_dist, key=bloom_dist.get)
+                    strengths.append(f"Mayor desempeño en nivel Bloom: {top_bloom}")
+
+                exam_result = ExamResult(
+                    exam_id=active_exam.id,
+                    user_id=current_user.id,
+                    # predominant_solo_level es NULL: no hay evaluacion SOLO real todavia.
+                    predominant_solo_level=predominant_solo,
+                    overall_description=(
+                        f"Completo {total_q} preguntas: {correct_count}/{total_mc_final} opcion multiple"
+                        + (f", 1 desarrollo" if desarrollo_qas else "")
+                    ),
+                    strengths=json.dumps(strengths),
+                    improvement_plan=json.dumps({"plan": "Revisar los temas con menor desempeno"}),
+                    bloom_distribution=json.dumps(bloom_dist),
+                    # solo_distribution: los valores en solo_dist son etiquetas de correccion,
+                    # no niveles SOLO. Se guarda el dict real para auditoria pero se documenta
+                    # que no debe interpretarse como distribucion SOLO.
+                    solo_distribution=json.dumps({"_nota": "valores son outcome_label, no niveles SOLO", **solo_dist}),
+                )
+                db.add(exam_result)
+                # Marcar examen como completado
+                active_exam.status = "completed"
+                db.commit()
+
+                feedback_display += f"\n\n---\n\n{summary}"
+            
+            return {
+                "answer": feedback_display,
+                "sources": [],
+                "exam_in_progress": (current_q < total_q),
+                "question_number": current_q,
+                "total_questions": total_q
+            }
+
+    return None
+
+
+# ========== FLUJO RAG: helpers compartidos por /query y /query/stream ==========
+_EXAM_OFFER_TEXT = (
+    "\n\n---\n\n**Has explorado varios temas en esta sesion. ¿Te gustaria hacer un examen formativo?** "
+    "Escribe **\"Quiero un examen\"** cuando estés listo."
+)
+_GENERIC_ERROR = "Error interno del servidor. Intenta de nuevo en unos momentos."
+
+
+def _get_or_create_conversation(body: QueryRequest, current_user: User, db: Session, query_text: str) -> Optional[Conversation]:
+    """Conversación indicada en la petición (None si no es del usuario) o una nueva."""
+    if body.conversation_id:
+        return db.query(Conversation).filter(
+            Conversation.id == body.conversation_id,
+            Conversation.user_id == current_user.id
+        ).first()
+    conv = Conversation(user_id=current_user.id, title=query_text[:50])
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return conv
+
+
+def _save_user_message(db: Session, conv: Conversation, query_text: str):
+    """Analiza y guarda la consulta del usuario. Devuelve (bloom_level, topics)."""
+    sentiment = analytics_engine.analyze_sentiment(query_text)
+    topics = analytics_engine.detect_topics(query_text)
+    complexity = analytics_engine.assess_complexity(query_text)
+    bloom_level, _ = qualitative_evaluator.classify_bloom_level(query_text)
+
+    # Metadatos de trazabilidad (P1.2): versión del clasificador, del modelo
+    # y del prompt en el momento de la clasificación. Permiten reproducir o
+    # auditar cualquier clasificación Bloom en el contexto del estudio de validez.
+    classifier_meta = {
+        "classifier_version": CLASSIFIER_VERSION,
+        "model_version": MODEL_VERSION,
+        "prompt_version": PROMPT_VERSION,
+        "classified_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+    db.add(Message(
+        conversation_id=conv.id,
+        role="user",
+        content=query_text,
+        sentiment_score=sentiment["score"],
+        sentiment_label=sentiment["label"],
+        query_complexity=complexity,
+        topics=json.dumps(topics),
+        bloom_level=bloom_level,
+        classifier_meta=classifier_meta,
+    ))
+    db.commit()
+    return bloom_level, topics
+
+
+def _recent_history(conv: Conversation) -> list:
+    """Últimos 6 mensajes de la conversación (incluye la consulta recién guardada)."""
+    return [{"role": m.role, "content": m.content} for m in conv.messages[-6:]]
+
+
+def _save_assistant_exchange(
+    db: Session, conv: Conversation, current_user: User, query_text: str,
+    answer: str, sources_used: list, response_time: float,
+    bloom_level: str, topics: list,
+) -> Message:
+    """Guarda la respuesta, el log de la consulta y actualiza el progreso del estudiante."""
+    assistant_msg = Message(
+        conversation_id=conv.id,
+        role="assistant",
+        content=answer,
+        sources=json.dumps(sources_used),
+        response_time=response_time,
+    )
+    db.add(assistant_msg)
+    db.add(QueryLog(
+        user_id=current_user.id,
+        query=query_text,
+        sources_found=json.dumps(sources_used),
+        top_k_used=3,
+        response_time=response_time,
+    ))
+
+    progress = db.query(StudentProgress).filter(
+        StudentProgress.user_id == current_user.id
+    ).first()
+    if not progress:
+        progress = StudentProgress(
+            user_id=current_user.id,
+            first_query_date=datetime.utcnow(),
+            total_queries=1
         )
-        db.add(user_msg)
-        db.commit()
-        
-        # Historial reciente de la conversación para contexto
-        recent_history = []
-        if conv.messages:
-            for m in conv.messages[-6:]:
-                recent_history.append({"role": m.role, "content": m.content})
+        db.add(progress)
+    else:
+        progress.total_queries = (progress.total_queries or 0) + 1
+    progress.last_query_date = datetime.utcnow()
+
+    # Distribución Bloom precalculada (evita recalcular en cada /me/progress).
+    # Copia nueva: SQLAlchemy no detecta cambios al mutar el dict JSON en sitio.
+    bloom_dist = dict(progress.bloom_distribution or {})
+    bloom_dist[bloom_level] = bloom_dist.get(bloom_level, 0) + 1
+    progress.bloom_distribution = bloom_dist
+
+    try:
+        current_topics = json.loads(progress.topics_explored) if progress.topics_explored else []
+    except Exception:
+        current_topics = []
+    progress.topics_explored = json.dumps(list(set(current_topics) | set(topics)))
+
+    db.commit()
+    return assistant_msg
+
+
+async def _run_query(body: QueryRequest, current_user: User, db: Session) -> dict:
+    """Lógica de /query (respuesta completa, sin streaming)."""
+    try:
+        query_text = body.query.strip()
+
+        exam_result = await run_in_threadpool(_handle_exam_flow, body, current_user, db)
+        if exam_result is not None:
+            return exam_result
+
+        # ===== 5. FLUJO NORMAL DE RAG (Multi-Source) =====
+        conv = _get_or_create_conversation(body, current_user, db, query_text)
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+        bloom_level, topics = _save_user_message(db, conv, query_text)
+        recent_history = _recent_history(conv)
 
         # ===== CACHÉ REDIS =====
         # Solo cachear consultas sin historial previo (preguntas directas, no continuaciones)
@@ -800,74 +889,22 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
                 sources_count=3,
                 conversation_history=recent_history if len(recent_history) > 1 else None,
             )
-            # Guardar en caché solo respuestas limpias (sin examen activo)
             if use_cache:
                 rag_cache.set_cached(query_text, synthesis_result)
-        
-        response_time = time.time() - start_time
-        
-        # Usar respuesta sintetizada del LLM
+
         answer_display = synthesis_result["synthesized_answer"]
-        
+
         # Ofrecer examen: ≥5 preguntas, ≥2 temas distintos, una sola vez por conversación
         offer = should_offer_exam(conv.messages)
         if offer:
-            answer_display += "\n\n---\n\n"
-            answer_display += "**Has explorado varios temas en esta sesion. ¿Te gustaria hacer un examen formativo?**\n\n"
-            answer_display += "Escribe **\"Quiero un examen\"** cuando estés listo.\n\n"
-        
-        # Guardar respuesta
-        assistant_msg = Message(
-            conversation_id=conv.id,
-            role="assistant",
-            content=answer_display,
-            sources=json.dumps(synthesis_result["sources_used"]),
-            response_time=synthesis_result["response_time"]
+            answer_display += _EXAM_OFFER_TEXT
+
+        assistant_msg = _save_assistant_exchange(
+            db, conv, current_user, query_text, answer_display,
+            synthesis_result["sources_used"], synthesis_result["response_time"],
+            bloom_level, topics,
         )
-        db.add(assistant_msg)
-        
-        # Log
-        query_log = QueryLog(
-            user_id=current_user.id,
-            query=query_text,
-            sources_found=json.dumps(synthesis_result["sources_used"]),
-            top_k_used=3,
-            response_time=synthesis_result["response_time"]
-        )
-        db.add(query_log)
-        
-        # Actualizar progreso
-        progress = db.query(StudentProgress).filter(
-            StudentProgress.user_id == current_user.id
-        ).first()
 
-        if not progress:
-            progress = StudentProgress(
-                user_id=current_user.id,
-                first_query_date=datetime.utcnow(),
-                total_queries=1
-            )
-            db.add(progress)
-        else:
-            progress.total_queries = (progress.total_queries or 0) + 1
-
-        progress.last_query_date = datetime.utcnow()
-
-        # Actualizar distribución Bloom precalculada (evita recalcular en cada /me/progress)
-        bloom_dist = progress.bloom_distribution or {}
-        bloom_dist[bloom_level] = bloom_dist.get(bloom_level, 0) + 1
-        progress.bloom_distribution = bloom_dist
-
-        # Actualizar temas explorados
-        try:
-            current_topics = json.loads(progress.topics_explored) if progress.topics_explored else []
-        except Exception:
-            current_topics = []
-        merged = list(set(current_topics) | set(topics))
-        progress.topics_explored = json.dumps(merged)
-
-        db.commit()
-        
         return {
             "answer": answer_display,
             "sources": synthesis_result["sources_used"],
@@ -877,9 +914,22 @@ Puedes solicitar un nuevo examen cuando estés listo escribiendo **"Quiero un ex
             "should_offer_exam": offer
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Error interno en /query: %s", str(e))
-        raise HTTPException(status_code=500, detail="Error interno del servidor. Intenta de nuevo en unos momentos.")
+        raise HTTPException(status_code=500, detail=_GENERIC_ERROR)
+
+
+@app.post("/query")
+@limiter.limit("30/minute", key_func=_rate_key)
+async def query(
+    request: Request,
+    body: QueryRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return await _run_query(body, current_user, db)
 
 # [Resto de endpoints sin cambios]
 @app.post("/feedback")
@@ -1721,7 +1771,7 @@ async def export_bloom_coding(
 # ========== ANALYTICS DASHBOARD ==========
 # ========== STREAMING ENDPOINT ==========
 @app.post("/query/stream")
-@limiter.limit("30/minute")
+@limiter.limit("30/minute", key_func=_rate_key)
 async def query_stream(
     request: Request,
     body: QueryRequest,
@@ -1735,155 +1785,130 @@ async def query_stream(
       data: {"type":"meta","conversation_id":N,"message_id":N,"sources":[...],"response_time":N}
       data: {"type":"done"}
       data: {"type":"error","detail":"..."}
-    Exámenes y flujos de estado se delegan a /query normal (no se streamean).
+    Los flujos de examen no se streamean: se responden completos, envueltos en SSE.
     """
     query_text = body.query.strip()
+    sse_headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
-    # Flujos de estado (examen, cancelar, confirmar) → delegar a /query normal sin streaming
-    is_state_query = (
-        is_exam_request(query_text)
-        or ("cancelar" in query_text.lower() and "examen" in query_text.lower())
-        or is_exam_confirmation(query_text)
-        or get_active_exam(current_user.id, db) is not None
-    )
+    try:
+        state_result = await run_in_threadpool(_handle_exam_flow, body, current_user, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error interno en /query/stream (examen): %s", str(e))
+        raise HTTPException(status_code=500, detail=_GENERIC_ERROR)
 
-    if is_state_query:
-        # Redirige internamente al handler normal y envuelve en SSE
-        result = await query(request, current_user, db)
+    if state_result is not None:
         async def _wrap_json():
-            data = json.dumps({"type": "token", "content": result["answer"]})
+            data = json.dumps({"type": "token", "content": state_result["answer"]})
             yield f"data: {data}\n\n"
             meta = {
                 "type": "meta",
-                "conversation_id": result.get("conversation_id"),
-                "message_id": result.get("message_id"),
-                "sources": result.get("sources", []),
-                "response_time": result.get("response_time"),
+                "conversation_id": state_result.get("conversation_id"),
+                "message_id": state_result.get("message_id"),
+                "sources": state_result.get("sources", []),
+                "response_time": state_result.get("response_time"),
             }
             yield f"data: {json.dumps(meta)}\n\n"
             yield f"data: {json.dumps({'type':'done'})}\n\n"
-        return StreamingResponse(_wrap_json(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        return StreamingResponse(_wrap_json(), media_type="text/event-stream", headers=sse_headers)
+
+    def _sse_error(detail: str) -> str:
+        return f"data: {json.dumps({'type':'error','detail':detail})}\n\n"
 
     async def _stream() -> AsyncGenerator[str, None]:
         start_time = time.time()
         full_text = ""
         try:
-            # Conversación
-            if body.conversation_id:
-                conv = db.query(Conversation).filter(
-                    Conversation.id == body.conversation_id,
-                    Conversation.user_id == current_user.id
-                ).first()
-                if not conv:
-                    yield f"data: {json.dumps({'type':'error','detail':'Conversación no encontrada'})}\n\n"
-                    return
+            conv = _get_or_create_conversation(body, current_user, db, query_text)
+            if not conv:
+                yield _sse_error("Conversación no encontrada")
+                return
+
+            bloom_level, topics = _save_user_message(db, conv, query_text)
+            recent_history = _recent_history(conv)
+
+            # Caché: solo consultas sin historial previo (igual que /query)
+            use_cache = len(recent_history) <= 1
+            cached = rag_cache.get_cached(query_text) if use_cache else None
+
+            if cached:
+                sources_used = cached["sources_used"]
+                full_text = cached["synthesized_answer"]
+                yield f"data: {json.dumps({'type':'token','content':full_text})}\n\n"
             else:
-                conv = Conversation(user_id=current_user.id, title=query_text[:50])
-                db.add(conv); db.commit(); db.refresh(conv)
-
-            # Análisis
-            sentiment = analytics_engine.analyze_sentiment(query_text)
-            topics    = analytics_engine.detect_topics(query_text)
-            complexity = analytics_engine.assess_complexity(query_text)
-            bloom_level, _ = qualitative_evaluator.classify_bloom_level(query_text)
-
-            user_msg = Message(
-                conversation_id=conv.id, role="user", content=query_text,
-                sentiment_score=sentiment["score"], sentiment_label=sentiment["label"],
-                query_complexity=complexity, topics=json.dumps(topics), bloom_level=bloom_level,
-            )
-            db.add(user_msg); db.commit()
-
-            # Historial
-            recent_history = [{"role": m.role, "content": m.content} for m in conv.messages[-6:]]
-
-            # RAG: búsqueda vectorial (sin llamada LLM todavía)
-            synthesis_result = await rag_engine.query_multi_source_with_synthesis(
-                query=query_text, sources_count=3, chunks_per_source=10,
-                conversation_history=recent_history if len(recent_history) > 1 else None,
-                stream=True,  # señal para que devuelva el prompt en lugar del texto final
-            )
-
-            sources_used = synthesis_result["sources_used"]
-            synthesis_prompt = synthesis_result["synthesis_prompt"]
-
-            # Streaming del LLM token a token
-            import requests as req_lib
-            try:
-                llm_response = req_lib.post(
-                    f"{settings.DEEPSEEK_BASE_URL}/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
-                             "Content-Type": "application/json"},
-                    json={"model": settings.LLM_MODEL,
-                          "messages": [{"role": "user", "content": synthesis_prompt}],
-                          "max_tokens": settings.LLM_MAX_TOKENS,
-                          "temperature": 0.5, "stream": True},
-                    stream=True, timeout=180,
+                # RAG: búsqueda vectorial (sin llamada LLM todavía)
+                synthesis_result = await rag_engine.query_multi_source_with_synthesis(
+                    query=query_text, sources_count=3,
+                    conversation_history=recent_history if len(recent_history) > 1 else None,
+                    stream=True,  # señal para que devuelva el prompt en lugar del texto final
                 )
-            except req_lib.exceptions.Timeout:
-                yield f"data: {json.dumps({'type':'error','detail':'El servicio de IA tardó demasiado. Intenta de nuevo en unos momentos.'})}\n\n"
-                return
-            except req_lib.exceptions.ConnectionError:
-                yield f"data: {json.dumps({'type':'error','detail':'No se pudo conectar al servicio de IA. Verifica la conexión.'})}\n\n"
-                return
+                sources_used = synthesis_result["sources_used"]
 
-            with llm_response:
-                if llm_response.status_code != 200:
-                    yield f"data: {json.dumps({'type':'error','detail':'Error del servicio de IA. Intenta de nuevo.'})}\n\n"
+                # Streaming del LLM token a token. Cliente asíncrono: con requests
+                # el worker quedaba bloqueado durante toda la respuesta.
+                try:
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=10.0)) as client:
+                        async with client.stream(
+                            "POST",
+                            f"{settings.DEEPSEEK_BASE_URL}/v1/chat/completions",
+                            headers={"Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
+                                     "Content-Type": "application/json"},
+                            json={"model": settings.LLM_MODEL,
+                                  "messages": [{"role": "user", "content": synthesis_result["synthesis_prompt"]}],
+                                  "max_tokens": settings.LLM_MAX_TOKENS,
+                                  "temperature": 0.5, "stream": True},
+                        ) as llm_response:
+                            if llm_response.status_code != 200:
+                                logger.error("DeepSeek respondió HTTP %s en /query/stream", llm_response.status_code)
+                                yield _sse_error("Error del servicio de IA. Intenta de nuevo.")
+                                return
+
+                            async for line in llm_response.aiter_lines():
+                                if not line.startswith("data: "):
+                                    continue
+                                payload = line[6:]
+                                if payload.strip() == "[DONE]":
+                                    break
+                                try:
+                                    delta = json.loads(payload)["choices"][0].get("delta", {})
+                                except Exception:
+                                    continue
+                                token = delta.get("content", "")
+                                if token:
+                                    full_text += token
+                                    yield f"data: {json.dumps({'type':'token','content':token})}\n\n"
+                except httpx.TimeoutException:
+                    yield _sse_error("El servicio de IA tardó demasiado. Intenta de nuevo en unos momentos.")
+                    return
+                except httpx.TransportError:
+                    yield _sse_error("No se pudo conectar al servicio de IA. Verifica la conexión.")
                     return
 
-                for raw_line in llm_response.iter_lines():
-                    if not raw_line:
-                        continue
-                    line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
-                    if not line.startswith("data: "):
-                        continue
-                    payload = line[6:]
-                    if payload.strip() == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(payload)
-                        delta = chunk["choices"][0].get("delta", {})
-                        token = delta.get("content", "")
-                        if token:
-                            full_text += token
-                            yield f"data: {json.dumps({'type':'token','content':token})}\n\n"
-                    except Exception:
-                        continue
+                # Post-procesamiento
+                full_text = rag_engine._remove_unicode_math_duplicates(full_text)
 
-            # Post-procesamiento
-            full_text = rag_engine._remove_unicode_math_duplicates(full_text)
+                if use_cache:
+                    rag_cache.set_cached(query_text, {
+                        "synthesized_answer": full_text,
+                        "sources_used": sources_used,
+                        "raw_context": synthesis_result["raw_context"],
+                        "response_time": round(time.time() - start_time, 2),
+                    })
 
             # Ofrecer examen: ≥5 preguntas, ≥2 temas distintos, una sola vez por conversación
             db.refresh(conv)
             offer = should_offer_exam(conv.messages)
             if offer:
-                extra = "\n\n---\n\n**Has explorado varios temas en esta sesion. ¿Te gustaria hacer un examen formativo?** Escribe **\"Quiero un examen\"** cuando estés listo."
-                full_text += extra
-                yield f"data: {json.dumps({'type':'token','content':extra})}\n\n"
+                full_text += _EXAM_OFFER_TEXT
+                yield f"data: {json.dumps({'type':'token','content':_EXAM_OFFER_TEXT})}\n\n"
 
             response_time = round(time.time() - start_time, 2)
 
-            # Guardar respuesta
-            assistant_msg = Message(
-                conversation_id=conv.id, role="assistant", content=full_text,
-                sources=json.dumps(sources_used), response_time=response_time,
+            assistant_msg = _save_assistant_exchange(
+                db, conv, current_user, query_text, full_text,
+                sources_used, response_time, bloom_level, topics,
             )
-            db.add(assistant_msg)
-            db.add(QueryLog(user_id=current_user.id, query=query_text,
-                            sources_found=json.dumps(sources_used), top_k_used=3,
-                            response_time=response_time))
-
-            progress = db.query(StudentProgress).filter(StudentProgress.user_id == current_user.id).first()
-            if not progress:
-                progress = StudentProgress(user_id=current_user.id,
-                                           first_query_date=datetime.utcnow(), total_queries=1)
-                db.add(progress)
-            else:
-                progress.total_queries = (progress.total_queries or 0) + 1
-            progress.last_query_date = datetime.utcnow()
-            db.commit()
 
             meta = {"type": "meta", "conversation_id": conv.id,
                     "message_id": assistant_msg.id, "sources": sources_used,
@@ -1892,14 +1917,10 @@ async def query_stream(
             yield f"data: {json.dumps({'type':'done'})}\n\n"
 
         except Exception as e:
-            import traceback; traceback.print_exc()
-            yield f"data: {json.dumps({'type':'error','detail':str(e)})}\n\n"
+            logger.exception("Error interno en /query/stream: %s", str(e))
+            yield _sse_error(_GENERIC_ERROR)
 
-    return StreamingResponse(
-        _stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return StreamingResponse(_stream(), media_type="text/event-stream", headers=sse_headers)
 
 
 def _resolve_admin(token_qp: Optional[str], db: Session, authorization: Optional[str] = None) -> User:

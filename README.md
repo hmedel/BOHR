@@ -3,8 +3,8 @@
 Sistema educativo de Recuperación-Generación Aumentada (RAG) para el curso **Estructura de la Materia** en la Facultad de Estudios Superiores Cuautitlán (FESC-UNAM). Permite a los estudiantes consultar material bibliográfico, recibir respuestas con soporte LaTeX, y realizar exámenes formativos adaptativos.
 
 **URLs públicas:**
-- Chat: [https://chat.bohrbot.space](https://chat.bohrbot.space)
-- API: [https://api.bohrbot.space](https://api.bohrbot.space)
+- Chat: [https://chat.pauling.cloud](https://chat.pauling.cloud)
+- API: [https://api.pauling.cloud](https://api.pauling.cloud)
 
 ![Pantalla de login — BOHR FESC-UNAM](docs/screenshots/login.png)
 
@@ -155,7 +155,7 @@ done < <(tail -n +2 alumnos.csv)
 
 ### Dashboard de analytics (solo admins)
 
-Abrir en navegador: `https://api.bohrbot.space/analytics?token=<JWT>`
+Abrir en navegador: `https://api.pauling.cloud/analytics?token=<JWT>`
 
 O desde el chat: iniciar sesión como admin → botón **📊 Analytics**.
 
@@ -243,7 +243,7 @@ BOHR/
 ## Seguridad
 
 - Las API keys y secrets van **únicamente en `.env`** — nunca en el código
-- CORS restringido a `chat.bohrbot.space` y `localhost:9000`
+- CORS restringido a `chat.pauling.cloud` y `localhost:9000`
 - Rate limiting: `/register` 10 req/min, `/token` 20 req/min
 - Contraseñas hasheadas con SHA-256
 - Tokens JWT con expiración de 7 días

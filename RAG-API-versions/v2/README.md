@@ -86,15 +86,15 @@ curl http://localhost:8000/health
 
 - **Local**: http://localhost:9000
 - **Red interna**: http://132.248.102.133:9000
-- **Publico**: https://chat.bohrbot.space
+- **Publico**: https://chat.pauling.cloud
 
 ## Arquitectura
 
 ```
                     ┌──────────────────────────┐
                     │   Cloudflare Tunnel       │
-                    │   chat.bohrbot.space       │
-                    │   api.bohrbot.space        │
+                    │   chat.pauling.cloud       │
+                    │   api.pauling.cloud        │
                     └────────┬─────────────────┘
                              │
          ┌───────────────────┼───────────────────┐

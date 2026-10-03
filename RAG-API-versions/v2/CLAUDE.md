@@ -5,9 +5,10 @@
 BOHR RAG v2 is an educational RAG (Retrieval-Augmented Generation) chatbot for "Estructura de la Materia" (Atomic/Molecular Structure) at FESC-UNAM. Multi-user system with JWT authentication, persistent conversations, formative exams with adaptive difficulty, sentiment analytics, streaming responses, and LaTeX-rendered mathematical responses.
 
 **Public URLs:**
-- Frontend: https://chat.bohrbot.space
-- API: https://api.bohrbot.space
-- Internal: http://132.248.102.133:8000 (API), :9000 (frontend)
+- Frontend: https://chat.pauling.cloud
+- API: https://api.pauling.cloud
+- Internal (server only): http://127.0.0.1:8000 (API), :9000 (frontend) — both bind to 127.0.0.1; public access only through the Cloudflare tunnel
+- Old domain chat./api.bohrbot.space still routed by the tunnel and allowed in CORS until it expires
 
 **Python environment:** `/home/medel/.julia/conda/3/x86_64/envs/bohrenv/bin/python`
 Note: `conda activate` does not work in non-interactive subshells — always use the full path above.
@@ -65,7 +66,7 @@ v2/
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/token` | POST | No | Login (OAuth2 form: username + password) |
-| `/register` | POST | No | Create user (username, email, password, full_name) |
+| `/register` | POST | No | Create user — closed by default (403); set `ALLOW_REGISTRATION=true` in `.env` to reopen. Accounts are created with `bulk_create_users.py` |
 | `/query` | POST | JWT | Main query — RAG + exam state machine (returns full response) |
 | `/query/stream` | POST | JWT | Streaming query — same logic, returns SSE tokens |
 | `/me/progress` | GET | JWT | Student progress: queries, Bloom dist, topics, trend |
@@ -122,7 +123,7 @@ query_multi_source_with_synthesis(query, sources_count=3, chunks_per_source=10,
 
 ## Exam System (adaptive difficulty)
 
-- **Trigger**: Pattern matching ("examen", "evalúame", "prueba", etc.)
+- **Trigger**: `is_exam_request()` in `exam_engine.py` ("examen", "evalúame", "hazme una prueba"). Bare "prueba"/"evaluación" do not trigger: they appear in chemistry questions
 - **Prerequisites**: ≥3 queries + ≥2 different topics
 - **Adaptive difficulty**: `get_difficulty_profile()` checks past ExamResult records
   - ≥80% correct → start at `aplicar`, max `crear`
@@ -193,8 +194,10 @@ $PYTHON -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4 --log-lev
 # Start frontend
 cd frontend && nohup python -m http.server 9000 > frontend.log 2>&1 &
 
-# Restart backend
-pkill -f "uvicorn app.main:app"; sleep 3; $PYTHON -m uvicorn app.main:app ...
+# Reload backend after a code change (systemd unit bohr-backend; no sudo needed)
+kill -HUP $(systemctl show -p MainPID --value bohr-backend)   # uvicorn restarts its workers
+# Full restart: sudo systemctl restart bohr-backend
+# Never `pkill -f "uvicorn app.main:app"` from a script: the pattern matches the shell running it
 
 # Health check
 curl http://localhost:8000/health
@@ -220,6 +223,17 @@ CHUNK_OVERLAP=300
 LLM_TEMPERATURE=0.4
 LLM_MAX_TOKENS=4000
 ```
+
+## Query endpoints share one implementation
+
+`/query` and `/query/stream` both call `_handle_exam_flow()` (exam state machine, run in the
+threadpool) and the helpers `_save_user_message()` / `_save_assistant_exchange()`. Change the
+flow there, not in one endpoint: the two used to be separate copies and drifted (the stream
+path lost `classifier_meta` and the exam flow). Blocking work (ChromaDB, Ollama, DeepSeek via
+`requests`) must go through `run_in_threadpool`; the streaming LLM call uses `httpx.AsyncClient`.
+Rate limits on these endpoints are keyed by user (`_rate_key`), not by IP.
+
+SQLite runs in WAL mode (set in `database.py`); back it up with `backup_db.sh` (`sqlite3 .backup`), not `cp`.
 
 ## Common Issues
 

@@ -13,6 +13,8 @@
 
     <!-- Marked.js para Markdown -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- DOMPurify: sanea el HTML que produce marked antes de insertarlo en la página -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 
     <!-- Highlight.js para código -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -1205,8 +1207,7 @@
                     </div>
                     <button type="submit" class="btn" id="loginBtn">Ingresar</button>
                 </form>
-                <div class="auth-switch">¿No tienes cuenta? <a href="#" onclick="showRegister()">Regístrate aquí</a>
-                </div>
+                <div class="auth-switch">¿No tienes cuenta? Solicítala a tu profesor.</div>
             </div>
             <div class="auth-form hidden" id="registerForm">
                 <h2>Crear Cuenta</h2>
@@ -1295,6 +1296,11 @@
             return false;
         }
 
+        function escapeHtml(text) {
+            return String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
         // Configurar marked
         marked.setOptions({
             breaks: true,
@@ -1349,6 +1355,8 @@
 
             // 3. Procesar markdown
             let htmlContent = marked.parse(processed);
+            // Las expresiones LaTeX siguen como marcadores de texto, así que sanear aquí no las altera
+            if (window.DOMPurify) htmlContent = DOMPurify.sanitize(htmlContent);
 
             // 4. Restaurar expresiones LaTeX
             htmlContent = htmlContent.replace(/%%LATEX_DISPLAY_(\d+)%%/g, (_, id) => {
@@ -1617,7 +1625,7 @@
                 }
                 list.innerHTML = conversations.map(conv => `
                     <div class="conversation-item ${conv.id === currentConversationId ? 'active' : ''}" onclick="loadConversation(${conv.id})">
-                        <div class="conversation-title">${conv.title}</div>
+                        <div class="conversation-title">${escapeHtml(conv.title)}</div>
                         <div class="conversation-meta">${conv.message_count} mensajes • ${new Date(conv.updated_at).toLocaleDateString()}</div>
                     </div>
                 `).join('');
@@ -1813,7 +1821,7 @@
                                 loadConversations();
                                 loadProgress();
                             } else if (evt.type === 'error') {
-                                contentEl.innerHTML = `<div class="error-message">⚠️ ${evt.detail}</div>`;
+                                contentEl.innerHTML = `<div class="error-message">⚠️ ${escapeHtml(evt.detail)}</div>`;
                             }
                         } catch(e) { /* línea incompleta */ }
                     }

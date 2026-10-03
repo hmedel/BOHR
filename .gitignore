@@ -15,6 +15,8 @@ venv/
 # ── Datos persistentes (no versionar) ───────────────────────
 RAG-API-versions/v2/data/chroma/
 RAG-API-versions/v2/data/rag_system.db
+RAG-API-versions/v2/data/rag_system.db-wal
+RAG-API-versions/v2/data/rag_system.db-shm
 RAG-API-versions/v2/data/rag_system.db.backup*
 RAG-API-versions/v2/data/backups/
 RAG-API-versions/v2/data/uploaded/
@@ -79,3 +81,6 @@ main_with_analytics.py
 
 # Frontend backups
 frontend/index.html.backup*
+
+# ── Exports del estudio de validez (texto de consultas de estudiantes; no versionar) ──
+RAG-API-versions/v2/exports_v*/

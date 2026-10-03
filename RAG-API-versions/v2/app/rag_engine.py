@@ -10,6 +10,7 @@ import re
 import logging
 from typing import List, Dict, Optional
 from collections import defaultdict
+from starlette.concurrency import run_in_threadpool
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,9 @@ class RAGEngine:
             raise Exception("No se pudo conectar al servicio de IA. Verifica la conexión e intenta de nuevo.")
 
         if response.status_code != 200:
-            raise Exception(f"API error: {response.text}")
+            # El cuerpo del error va al log, no al estudiante
+            logger.error("DeepSeek respondió HTTP %s: %s", response.status_code, response.text[:500])
+            raise Exception("Error del servicio de IA. Intenta de nuevo en unos momentos.")
 
         return response.json()["choices"][0]["message"]["content"]
     
@@ -294,6 +297,25 @@ class RAGEngine:
         query_lower = query.lower()
         return any(trigger in query_lower for trigger in exam_triggers)
     async def query_multi_source_with_synthesis(
+        self,
+        query: str,
+        sources_count: int = 3,
+        chunks_per_source: int = None,
+        conversation_history: Optional[List[Dict]] = None,
+        stream: bool = False,
+    ) -> Dict:
+        """Versión async: corre _multi_source_sync en el pool de hilos.
+
+        La búsqueda en ChromaDB, los embeddings de Ollama y la llamada al LLM son
+        síncronas; ejecutarlas directamente en el event loop bloqueaba al worker
+        entero durante toda la consulta.
+        """
+        return await run_in_threadpool(
+            self._multi_source_sync, query, sources_count, chunks_per_source,
+            conversation_history, stream,
+        )
+
+    def _multi_source_sync(
         self,
         query: str,
         sources_count: int = 3,

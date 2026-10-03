@@ -6,7 +6,9 @@ BACKUP_DIR="/home/medel/BOHR/RAG-API-versions/v2/data/backups"
 DB="/home/medel/BOHR/RAG-API-versions/v2/data/rag_system.db"
 DEST="$BACKUP_DIR/rag_system_$(date +%Y%m%d_%H%M%S).db"
 
-cp "$DB" "$DEST" && echo "[$(date)] Backup OK: $DEST"
+# .backup en lugar de cp: copia consistente aunque haya escrituras en curso
+# (con WAL, copiar solo el .db puede dejar fuera transacciones recientes).
+sqlite3 "$DB" ".backup '$DEST'" && echo "[$(date)] Backup OK: $DEST"
 
 # Conservar solo los últimos 4 backups
 ls -t "$BACKUP_DIR"/rag_system_*.db 2>/dev/null | tail -n +5 | xargs -r rm

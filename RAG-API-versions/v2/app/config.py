@@ -28,7 +28,11 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 1500
     CHUNK_OVERLAP: int = 300
     JWT_SECRET_KEY: str  # Required — set in .env, never hardcode
-    
+
+    # Registro público cerrado por defecto: las cuentas se dan de alta con
+    # bulk_create_users.py. Poner ALLOW_REGISTRATION=true en .env para reabrirlo.
+    ALLOW_REGISTRATION: bool = False
+
     # Parámetros del LLM - BALANCE ENTRE PRECISIÓN Y ELABORACIÓN
     LLM_TEMPERATURE: float = 0.4  # Balance óptimo: elaboración moderada sin verbosidad
     LLM_MAX_TOKENS: int = 2500  # Suficiente para respuestas completas; bajar de 4000 reduce latencia ~20-30%

@@ -8,6 +8,10 @@ Guia practica para administrar el sistema BOHR RAG v2: gestion de usuarios, serv
 
 ### Dar de Alta un Alumno
 
+El registro público está cerrado por defecto (`/register` responde 403). Para altas usa el
+CSV de la sección siguiente. El comando de abajo solo funciona si pones
+`ALLOW_REGISTRATION=true` en `.env` y recargas el backend.
+
 ```bash
 curl -s -X POST http://localhost:8000/register \
   -H "Content-Type: application/json" \
@@ -127,8 +131,8 @@ ps aux | grep -E "uvicorn|http.server" | grep -v grep
 ss -tlnp | grep -E "8000|9000"
 
 # URLs publicas
-curl -s -o /dev/null -w "%{http_code}" https://api.bohrbot.space/health
-curl -s -o /dev/null -w "%{http_code}" https://chat.bohrbot.space
+curl -s -o /dev/null -w "%{http_code}" https://api.pauling.cloud/health
+curl -s -o /dev/null -w "%{http_code}" https://chat.pauling.cloud
 
 # Servicios externos
 curl -s http://localhost:11434/api/tags  # Ollama
@@ -148,7 +152,7 @@ tail -f logs/cloudflare_tunnel.log            # Tunnel
 
 ### Dashboard web (solo admins)
 
-Abrir en el navegador: `https://api.bohrbot.space/analytics?token=<JWT>`
+Abrir en el navegador: `https://api.pauling.cloud/analytics?token=<JWT>`
 
 O desde el chat: login como admin → botón **📊 Analytics** (esquina superior derecha).
 
@@ -298,7 +302,7 @@ cp data/backups/rag_system_FECHA.db data/rag_system.db
 
 ```bash
 ps aux | grep cloudflared | grep -v grep
-curl -s https://api.bohrbot.space/health
+curl -s https://api.pauling.cloud/health
 ```
 
 ### Reiniciar
@@ -312,8 +316,8 @@ nohup cloudflared tunnel run bohr-tunnel > logs/cloudflare_tunnel.log 2>&1 &
 
 | URL publica | Destino local |
 |---|---|
-| https://api.bohrbot.space | http://localhost:8000 |
-| https://chat.bohrbot.space | http://localhost:9000 |
+| https://api.pauling.cloud | http://localhost:8000 |
+| https://chat.pauling.cloud | http://localhost:9000 |
 
 Config: `~/.cloudflared/config.yml`
 
@@ -322,7 +326,7 @@ Config: `~/.cloudflared/config.yml`
 ## 7. Checklist Semanal
 
 - [ ] `curl http://localhost:8000/health` responde OK
-- [ ] `curl https://api.bohrbot.space/health` responde OK
+- [ ] `curl https://api.pauling.cloud/health` responde OK
 - [ ] `curl http://localhost:11434/api/tags` muestra nomic-embed-text
 - [ ] No hay errores recientes en logs
 - [ ] Espacio en disco suficiente: `df -h .`
@@ -338,7 +342,7 @@ Config: `~/.cloudflared/config.yml`
 1. Obtener lista de alumnos (CSV con Email y Cuenta)
 2. Registrar alumnos masivamente (ver seccion 1)
 3. Verificar que todos pueden hacer login
-4. Compartir URL: https://chat.bohrbot.space
+4. Compartir URL: https://chat.pauling.cloud
 5. Los alumnos veran el modal de bienvenida en su primer acceso automaticamente
 
 ### Fin de Semestre

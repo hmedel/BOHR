@@ -370,7 +370,7 @@ isDevelopment = hostname === 'localhost' ||
 
 API_URL = isDevelopment
     ? 'http://132.248.102.133:8000'     // Desarrollo
-    : 'https://api.bohrbot.space'        // Produccion
+    : 'https://api.pauling.cloud'        // Produccion
 ```
 
 ## 4. Base de Datos

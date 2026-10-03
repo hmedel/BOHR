@@ -29,16 +29,16 @@ echo ""
 echo "🌐 URLs Públicas:"
 echo ""
 
-echo "Frontend (chat.bohrbot.space):"
-if curl -s -I https://chat.bohrbot.space 2>/dev/null | head -1 | grep -q "200"; then
+echo "Frontend (chat.pauling.cloud):"
+if curl -s -I https://chat.pauling.cloud 2>/dev/null | head -1 | grep -q "200"; then
     echo "✅ Accesible"
 else
     echo "⚠️  No accesible (puede estar propagando DNS)"
 fi
 echo ""
 
-echo "Backend API (api.bohrbot.space):"
-if curl -s https://api.bohrbot.space/health 2>/dev/null | python -m json.tool 2>/dev/null; then
+echo "Backend API (api.pauling.cloud):"
+if curl -s https://api.pauling.cloud/health 2>/dev/null | python -m json.tool 2>/dev/null; then
     echo "✅ API respondiendo"
 else
     echo "⚠️  API no accesible"

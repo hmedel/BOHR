@@ -24,13 +24,16 @@ def _prehash(password: str) -> bytes:
     """Pre-hash SHA-256 → 64 hex chars (< 72 bytes), elimina el límite de bcrypt."""
     return hashlib.sha256(password.encode()).hexdigest().encode()
 
+def is_legacy_hash(hashed_password: str) -> bool:
+    """Hashes legacy: SHA-256 sin salt (64 chars hex), no empiezan con $2 (bcrypt)."""
+    return len(hashed_password) == 64 and not hashed_password.startswith("$2")
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verificar contraseña: SHA-256 pre-hash + bcrypt con salt.
-    Mantiene compatibilidad con hashes SHA-256 legacy (sin bcrypt).
+    Mantiene compatibilidad con hashes SHA-256 legacy (sin bcrypt); el login
+    los migra a bcrypt en cuanto la contraseña se verifica (ver main.login).
     """
-    # Hashes legacy: 64 chars hex, no empiezan con $2 (bcrypt)
-    if len(hashed_password) == 64 and not hashed_password.startswith("$2"):
-        logger.warning("Hash legacy SHA-256 detectado para login — se migrará a bcrypt en el próximo registro")
+    if is_legacy_hash(hashed_password):
         return hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password
     return bcrypt.checkpw(_prehash(plain_password), hashed_password.encode())
 

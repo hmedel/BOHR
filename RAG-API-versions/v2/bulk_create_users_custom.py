@@ -221,8 +221,8 @@ def main():
         epilog="""
 Formato del CSV:
     NAME,EMAIL,ID,PASSWORD,ROLE
-    ARIAS HERNANDEZ ISMAEL,ismaelari224@gmail.com,G01E001,426079613,USER
-    ARROYO BECERRIL ALEXIS,alexisagmazz@gmail.com,G01E002,323071581,USER
+    APELLIDO APELLIDO NOMBRE,estudiante1@example.com,G01E001,000000001,USER
+    APELLIDO APELLIDO NOMBRE,estudiante2@example.com,G01E002,000000002,USER
 
 Mapeo de columnas:
     NAME → full_name (nombre completo del estudiante)

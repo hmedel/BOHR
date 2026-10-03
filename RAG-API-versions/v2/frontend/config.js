@@ -1,7 +1,9 @@
 // Configuración de API según entorno
 const API_CONFIG = {
     development: 'http://132.248.102.133:8000',
-    production: 'https://api.bohrbot.space'
+    // La API vive en api.<dominio>. Se deriva del hostname para que el mismo archivo
+    // sirva en chat.pauling.cloud y en chat.bohrbot.space durante la transición.
+    production: `https://api.${window.location.hostname.replace(/^(chat|www)\./, '')}`
 };
 
 // Detectar entorno

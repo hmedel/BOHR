@@ -1,7 +1,7 @@
 # Manual de codificación Bloom y SOLO, y banco de reactivos abiertos
 
 Proyecto BOHR — Estructura de la Materia, FESC-UNAM  
-Versión 1.7 (2026-08-14): sep≥40 garantizado por verificación post-escritura (no pre). 13 estudiantes distintos en muestra principal; charly.2000.cr@gmail.com aporta 61/146 (42%). Nota de distribución añadida a A.4.
+Versión 1.7 (2026-08-14): sep≥40 garantizado por verificación post-escritura (no pre). 13 estudiantes distintos en muestra principal; Estudiante A aporta 61/146 (42%). Nota de distribución añadida a A.4.
 
 *Cambios v1.1 (2026-08-14): reactivos R5.1, R6.1 y R7.1 completados con elementos esperados, anclas relacionales/abstracto extendido y techo. Sin cambios en protocolo, reglas de desempate ni reactivos R1–R4.*
 
@@ -13,7 +13,7 @@ Versión 1.7 (2026-08-14): sep≥40 garantizado por verificación post-escritura
 
 *Cambios v1.5 (2026-08-14): correcciones derivadas de verificar contra el export real. (1) Corpus corregido: 358 mensajes totales (no 247), los mensajes de prueba del administrador caen en E1/E3/E4 por contenido, no por un criterio de usuario. (2) Tabla A.2 reducida: solo v4 y v5 con cifras exactas; v1–v3 en prosa para no publicar aproximaciones en tabla. (3) Párrafo v4→v5 reescrito: en v4 E5 excluyó 16 ítems; en v5 se reincorporaron 2 → E5=14. (4) A.3.2 y A.3.3 actualizadas con 269 elegibles y 244 de la muestra principal. (5) URL de Author Guidelines de JCE corregida a researcher-resources.acs.org.*
 
-*Cambios v1.6 (2026-08-14): criterio E0 agregado al protocolo y al código. Auditoría cruzando exclusiones por usuario reveló que 90 mensajes de la cuenta `admin` y 10 de `hmedel@tec.mx` sobrevivían la cascada y aparecían en los elegibles (37 % de la muestra anterior). E0 excluye todos los mensajes de cuentas con `is_admin=True` antes de la cascada E1–E5. Números definitivos del export v2.9.10: bruto=357, E0=122, no-admin=235, E1=15, E2=0, E3=0, E4_same=4, E4_cross=33, E5=12, elegibles=171, piloto=25, muestra principal=146.*
+*Cambios v1.6 (2026-08-14): criterio E0 agregado al protocolo y al código. Auditoría cruzando exclusiones por usuario reveló que 90 mensajes de la cuenta `admin` y 10 de la cuenta del coordinador sobrevivían la cascada y aparecían en los elegibles (37 % de la muestra anterior). E0 excluye todos los mensajes de cuentas con `is_admin=True` antes de la cascada E1–E5. Números definitivos del export v2.9.10: bruto=357, E0=122, no-admin=235, E1=15, E2=0, E3=0, E4_same=4, E4_cross=33, E5=12, elegibles=171, piloto=25, muestra principal=146.*
 
 *Cambios v1.7 (2026-08-14): (1) `_enforce_separation` reescrito con verificación exhaustiva post-escritura — el endpoint lanza excepción si queda algún par con sep<40, en lugar de entregar datos incorrectos silenciosamente. (2) Distribución de estudiantes añadida a A.4: 13 usuarios distintos; usuario más activo aporta 61/146 ítems (42 %). (3) Verificado: 0 violaciones en seed=42 y seed=99 sobre el nuevo export.*
 
@@ -567,7 +567,7 @@ Si una pregunta nueva no puede resolverse por estas dos sub-reglas, el coordinad
 | Piloto (seed=0, apartado) | 25 | — | 146 |
 | **Muestra principal** | — | — | **146** |
 
-*Nota: E0 excluye todas las cuentas con `is_admin=True` (`admin` y `hmedel@tec.mx`, 122 mensajes en total). Estos mensajes corresponden a pruebas del sistema y consultas del coordinador del estudio, no a consultas de estudiantes. E0 se aplica antes de la cascada y se reporta por separado.*
+*Nota: E0 excluye todas las cuentas con `is_admin=True` (`admin` y la cuenta del coordinador, 122 mensajes en total). Estos mensajes corresponden a pruebas del sistema y consultas del coordinador del estudio, no a consultas de estudiantes. E0 se aplica antes de la cascada y se reporta por separado.*
 
 **Cambio de v4 a v5:** en v4, el patrón E5 excluía 14 ítems (sobre el corpus de no-admin). Tras la auditoría (2/17 borderline, umbral 10 % activado), se reincorporaron 2 ítems añadiendo `antimater` y `superindice|subindice` al patrón. En v5, E5 excluye **12 ítems**. El tamaño de la muestra principal pasó de 144 a 146.
 
@@ -633,14 +633,14 @@ La transparencia sobre las iteraciones del criterio (v1 → v5) es necesaria por
 
 **Distribución de estudiantes en la muestra principal (146 ítems, 13 usuarios):**
 
-| Usuario | Ítems | % |
+| Usuario (seudónimo) | Ítems | % |
 |---------|------:|--:|
-| charly.2000.cr@gmail.com | 61 | 42 % |
-| poncearellanomiguelangel@gmail.com | 20 | 14 % |
-| guantex1725@gmail.com | 18 | 12 % |
-| zara.bello96@gmail.com | 15 | 10 % |
-| sergiogarcialaraidln@gmail.com | 12 | 8 % |
-| G01E013 | 10 | 7 % |
+| Estudiante A | 61 | 42 % |
+| Estudiante B | 20 | 14 % |
+| Estudiante C | 18 | 12 % |
+| Estudiante D | 15 | 10 % |
+| Estudiante E | 12 | 8 % |
+| Estudiante F | 10 | 7 % |
 | Otros 7 usuarios | 10 | 7 % |
 
 El corpus no es una muestra de la población de estudiantes de la asignatura sino el total de interacciones de los usuarios registrados en el periodo. La concentración en un usuario (42 %) es un dato que el artículo debe reportar explícitamente: los resultados del estudio de validez caracterizan en gran parte el comportamiento de ese usuario, no el promedio del grupo. El análisis de acuerdo puede estratificarse por usuario si la N lo permite.

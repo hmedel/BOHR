@@ -71,7 +71,7 @@ python list_users.py
 | ID | Usuario  | Email                               | Nombre Completo  | Admin | Fecha Creación   |
 +----+----------+-------------------------------------+------------------+-------+------------------+
 | 1  | demo     | demo@example.com                    | Demo User        | ❌     | 2025-10-26 23:51 |
-| 4  | G01E001  | ismaelari224@gmail.com              | ARIAS HERNANDEZ  | ❌     | 2025-11-05 04:33 |
+| 4  | G01E001  | estudiante1@example.com             | APELLIDO APELLIDO| ❌     | 2025-11-05 04:33 |
 +----+----------+-------------------------------------+------------------+-------+------------------+
 
 Total: 2 usuario(s)
@@ -113,7 +113,7 @@ python list_users.py --export --output mis_usuarios.csv
 ```csv
 USERNAME,EMAIL,FULL_NAME,IS_ADMIN,CREATED_AT
 demo,demo@example.com,Demo User,0,2025-10-26 23:51:00
-G01E001,ismaelari224@gmail.com,ARIAS HERNANDEZ ISMAEL,0,2025-11-05 04:33:00
+G01E001,estudiante1@example.com,APELLIDO APELLIDO NOMBRE,0,2025-11-05 04:33:00
 ```
 
 ---

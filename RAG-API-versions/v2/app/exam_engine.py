@@ -9,6 +9,36 @@ import re
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
+# Solicitud de examen. "prueba" y "evaluación" solo cuentan con un verbo de
+# petición: sueltas aparecen en consultas de química ("prueba a la flama",
+# "evaluación de la integral") y secuestraban la pregunta hacia el flujo de examen.
+_EXAM_REQUEST_PATTERNS = [
+    r'\bexamen\b',
+    r'\beval[uú]ame\b',
+    r'\bm[aá]s preguntas\b',
+    r'\b(hazme|ponme|dame|quiero|hacer|tomar|presentar)\s+(una\s+|otra\s+)?(prueba|evaluaci[oó]n)\b',
+]
+
+_CONFIRM_YES = re.compile(r'\bs[ií]\b')
+_CONFIRM_START = re.compile(r'\b(comenzar|empezar|iniciar|comencemos|empecemos|iniciemos)\b')
+
+def is_exam_request(query: str) -> bool:
+    """Detectar si el usuario solicita un examen"""
+    query_lower = query.lower()
+    return any(re.search(pattern, query_lower) for pattern in _EXAM_REQUEST_PATTERNS)
+
+def is_exam_confirmation(query: str) -> bool:
+    """Detectar confirmación para iniciar examen ("Sí, comenzar").
+
+    Mensaje corto con "sí" y un verbo de inicio como palabras completas. Antes
+    bastaba la subcadena "si", así que "¿es posible iniciar la reacción?" arrancaba
+    un examen.
+    """
+    query_lower = query.lower()
+    if len(query_lower.split()) > 6:
+        return False
+    return bool(_CONFIRM_YES.search(query_lower) and _CONFIRM_START.search(query_lower))
+
 class ExamEngine:
     """Generación y evaluación de exámenes conversacionales"""
     
